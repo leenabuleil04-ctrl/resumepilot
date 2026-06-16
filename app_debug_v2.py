@@ -12,7 +12,7 @@ from collections import Counter
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="CV Match AI",
+    page_title="ResumePilot",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -2218,7 +2218,7 @@ def render_landing():
     """, unsafe_allow_html=True)
 
 
-def nav_buttons(current, can_proceed=True, proceed_label="Continue →", back_label="← Back"):
+def nav_buttons(current, can_proceed=True, proceed_label="Next →", back_label="← Back"):
     st.markdown("<div style='margin-top:28px; padding-top:8px; border-top:1px solid #E5E7EB;'></div>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 6, 1])
     with col1:
@@ -2251,7 +2251,7 @@ if st.session_state.show_landing:
 render_header()
 current_tab = st.session_state.active_tab
 render_step_bar(current_tab)
-st.markdown("<hr style='border:none;border-top:1px solid #E5E7EB;margin-bottom:28px;'>", unsafe_allow_html=True)
+st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2263,11 +2263,13 @@ if current_tab == 0:
     st.markdown('<div class="rp-page-title">Target Position</div>', unsafe_allow_html=True)
     st.markdown('<div class="rp-page-sub">Tell us the role you\'re going for. We\'ll use it to match and tailor everything.</div>', unsafe_allow_html=True)
 
-    st.session_state.job_role = st.text_input(
+    job_role_input = st.text_input(
         "Target Job Title",
         value=st.session_state.job_role,
-        placeholder="e.g., Data Analyst Intern, Software Engineer, Marketing Associate"
+        placeholder="e.g., Data Analyst Intern, Software Engineer, Marketing Associate",
+        key="job_role_input"
     )
+    st.session_state.job_role = job_role_input
 
     st.session_state.job_desc = st.text_area(
         "Job Description",
@@ -2310,7 +2312,7 @@ Requirements:
         else:
             st.markdown('<div class="alert-box alert-green">✓ Job description looks good.</div>', unsafe_allow_html=True)
 
-    nav_buttons(0, can_proceed=job_ready, proceed_label="Continue →")
+    nav_buttons(0, can_proceed=job_ready, proceed_label="Next →")
 
 
 # ============================================================
@@ -2333,7 +2335,7 @@ elif current_tab == 1:
     )
     st.session_state.input_method = method
 
-    st.markdown("---")
+    st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
     # ---- UPLOAD ----
     if method == "Upload File (PDF/DOCX/TXT)":
@@ -2454,7 +2456,7 @@ elif current_tab == 1:
             st.session_state.cv_full_text.strip() or
             any(v.strip() for v in st.session_state.manual_cv_data.values())
         )
-    nav_buttons(1, can_proceed=cv_ready, proceed_label="Continue →")
+    nav_buttons(1, can_proceed=cv_ready, proceed_label="Next →")
 
 
 # ============================================================
@@ -2541,7 +2543,7 @@ elif current_tab == 2:
             </div>
             """, unsafe_allow_html=True)
 
-            st.markdown("---")
+            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
             # ── Strengths and Weaknesses ──
             col_s, col_w = st.columns(2)
@@ -2572,7 +2574,7 @@ elif current_tab == 2:
                     st.markdown('<div style="color:#16a34a;font-size:0.85rem;font-weight:600;">🎉 No major gaps!</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            st.markdown("---")
+            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
             # ── ATS Keywords ──
             ats_missing  = ai.get("ats_keywords_missing", [])
@@ -2605,7 +2607,7 @@ elif current_tab == 2:
 
             # ── Bullets needing metrics ──
             if metrics_miss:
-                st.markdown("---")
+                st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
                 st.markdown("**📊 Bullets That Need Metrics (add numbers = more impact)**")
                 for m in metrics_miss:
                     st.markdown(f'<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#78350f;">{m}</div>', unsafe_allow_html=True)
@@ -2613,12 +2615,12 @@ elif current_tab == 2:
             # ── Quick Wins ──
             quick_wins = ai.get("quick_wins", [])
             if quick_wins:
-                st.markdown("---")
+                st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
                 st.markdown("**⚡ Quick Wins — biggest impact improvements**")
                 for i, qw in enumerate(quick_wins, 1):
                     st.markdown(f'<div style="background:#f0f9ff;border-left:3px solid #0ea5e9;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#0c4a6e;">{i}. {qw}</div>', unsafe_allow_html=True)
 
-            st.markdown("---")
+            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
             nav_buttons(2, can_proceed=True, proceed_label="Next: Refine CV →")
 
 
@@ -2643,7 +2645,7 @@ elif current_tab == 3:
         else:
             st.error(f"Your CV scores **{score}%**. Be specific in your answers — they'll significantly improve the rewrite.")
 
-        st.markdown("---")
+        st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
         # ── Generate dynamic personalized questions (Step 3) ──
         if not st.session_state.dynamic_questions:
@@ -2729,7 +2731,7 @@ elif current_tab == 3:
 
             st.markdown("")
 
-        st.markdown("---")
+        st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
         st.markdown('<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:1rem;font-size:0.88rem;color:#0369a1;">'
                     '💡 <strong>Tip:</strong> Skip any question that doesn\'t apply — write "N/A" or leave it blank. '
                     'The AI rewriter will only use the answers you provide. It will never invent information you didn\'t give.'
@@ -2872,7 +2874,7 @@ elif current_tab == 4:
                         del st.session_state[k]
                 st.rerun()
 
-        st.markdown("---")
+        st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
         # ── CV Preview ──
         st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;">', unsafe_allow_html=True)
@@ -2917,7 +2919,7 @@ elif current_tab == 5:
         job_slug = re.sub(r'[^a-zA-Z0-9]', '_', st.session_state.job_role) if st.session_state.job_role else "CV"
         f_name = f"{first_name}_{job_slug}_CV"
 
-        st.markdown("<hr style='border:none;border-top:1px solid #E5E7EB;margin:20px 0;'>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
         c1, c2 = st.columns(2)
 
         with c1:
