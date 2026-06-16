@@ -2646,7 +2646,7 @@ elif current_tab == 3:
         st.markdown("---")
 
         # ── Generate dynamic personalized questions (Step 3) ──
-        if True:  # force regenerate for debugging
+        if not st.session_state.dynamic_questions:
             cv_sections = st.session_state.manual_cv_data.copy()
             if not any(v.strip() for v in cv_sections.values()):
                 cv_sections = classify_sections_refined(
