@@ -768,7 +768,8 @@ def claude_api_call(prompt, max_tokens=3000):
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
             return data["content"][0]["text"]
-    except Exception:
+    except Exception as e:
+        st.session_state['_last_api_error'] = str(e)
         return None
 
 
@@ -2645,7 +2646,7 @@ elif current_tab == 3:
         st.markdown("---")
 
         # ── Generate dynamic personalized questions (Step 3) ──
-        if not st.session_state.dynamic_questions:
+        if True:  # force regenerate for debugging
             cv_sections = st.session_state.manual_cv_data.copy()
             if not any(v.strip() for v in cv_sections.values()):
                 cv_sections = classify_sections_refined(
@@ -2682,7 +2683,8 @@ elif current_tab == 3:
                 if get_anthropic_api_key() is None:
                     st.error("⚠️ **ANTHROPIC_API_KEY not found.** Showing fallback questions. Add your key to enable personalized AI questions.")
                 else:
-                    st.warning("⚠️ Could not generate personalized questions (API error). Showing standard questions.")
+                    err_detail = st.session_state.get('_last_api_error', 'unknown error')
+                    st.warning(f"⚠️ Could not generate personalized questions ({err_detail}). Showing standard questions.")
 
         # ── Render questions (Step 4: store all answers in structured memory) ──
         questions = st.session_state.dynamic_questions
@@ -2698,7 +2700,8 @@ elif current_tab == 3:
 
             # Show section badge if available
             badge = f'<span style="font-size:0.72rem;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:9999px;font-weight:600;margin-left:6px;text-transform:uppercase;">{section}</span>' if section else ""
-            st.markdown(f'<div style="font-weight:700;font-size:0.95rem;color:#1e293b;margin-bottom:4px;">{text}{badge}</div>', unsafe_allow_html=True)
+            text_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+            st.markdown(f'<div style="font-weight:700;font-size:0.95rem;color:#1e293b;margin-bottom:4px;">{text_html}{badge}</div>', unsafe_allow_html=True)
             if gap:
                 st.markdown(f'<div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">Why we ask: {gap}</div>', unsafe_allow_html=True)
 
