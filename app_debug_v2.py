@@ -17,6 +17,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Hide Streamlit chrome — watermark, toolbar, deploy button
+st.markdown(
+    "<style>"
+    "#MainMenu,footer,header{visibility:hidden!important;}"
+    "[data-testid='stToolbar'],[data-testid='stDecoration'],"
+    "[data-testid='stStatusWidget'],.stDeployButton{display:none!important;}"
+    "</style>",
+    unsafe_allow_html=True,
+)
+
 # --- INITIALIZE SESSION STATE ---
 defaults = {
     'active_tab': 0,
@@ -644,6 +654,14 @@ def run_rule_based_analysis(cv_text, job_desc):
     }
 
 
+def get_anthropic_api_key():
+    """Return the Anthropic API key from st.secrets, or None if not configured."""
+    try:
+        return st.secrets["ANTHROPIC_API_KEY"]
+    except (KeyError, AttributeError, FileNotFoundError):
+        return None
+
+
 def call_claude_for_semantic_boost(cv_text, job_desc, job_role, rule_results):
     """
     Optional Claude API call for semantic insight layer.
@@ -652,6 +670,10 @@ def call_claude_for_semantic_boost(cv_text, job_desc, job_role, rule_results):
     Returns: dict with ai_insight string, adjusted_score, reclassified items.
     """
     import json
+
+    api_key = get_anthropic_api_key()
+    if not api_key:
+        return None
 
     partial_labels = [g["label"] for g in rule_results["partial"]]
     missing_labels = [g["label"] for g in rule_results["missing"]]
@@ -703,7 +725,7 @@ Respond in JSON only, no markdown:
             headers={
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
-                "x-api-key": "placeholder"   # Handled by Streamlit's proxy
+                "x-api-key": api_key,
             }
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -808,9 +830,11 @@ def classify_sections_refined(text):
         if not clean_line: continue
         low_line = clean_line.lower()
         found_header = False
-        if len(clean_line) < 70:
+        if len(clean_line) < 60:
             for key, pattern in SECTION_REGEX.items():
-                if re.search(pattern, low_line):
+                # Require the pattern to be the whole line (allow leading/trailing
+                # decoration like dashes, colons, whitespace — but no other words).
+                if re.search(r'^[\s\-=*•·_|]*' + pattern + r'[\s\-=*•·_|:]*$', low_line, re.IGNORECASE):
                     current_section = key
                     found_header = True
                     break
@@ -937,6 +961,10 @@ Return ONLY a JSON object with these keys (include only sections that exist in t
 
 Return ONLY valid JSON. No explanation, no markdown fences."""
 
+    api_key = get_anthropic_api_key()
+    if not api_key:
+        return None
+
     try:
         import json as json_mod
         import urllib.request
@@ -953,7 +981,7 @@ Return ONLY valid JSON. No explanation, no markdown fences."""
             headers={
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
-                "x-api-key": "placeholder"
+                "x-api-key": api_key,
             }
         )
         with urllib.request.urlopen(req, timeout=25) as resp:
@@ -1386,7 +1414,17 @@ def render_cv_html(cv_data, lang="English"):
                     html += f'<div class="isr-entry-sub">{clean}</div>'
             html += '</div>'
 
-    # 3. TECHNICAL SKILLS (high on page — recruiters scan this)
+    # 3. EXPERIENCE
+    if cv_data.get("experience"):
+        html += sec(h[3])
+        html += render_entries_html(cv_data["experience"])
+
+    # 4. PROJECTS
+    if cv_data.get("projects"):
+        html += sec(h[4])
+        html += render_entries_html(cv_data["projects"])
+
+    # 5. SKILLS
     raw_skills = cv_data.get("skills", "")
     if raw_skills:
         raw_skills_clean = re.sub(
@@ -1406,17 +1444,7 @@ def render_cv_html(cv_data, lang="English"):
             prof_label = ("כישורים מקצועיים" if lang == "Hebrew" else "المهارات المهنية" if lang == "Arabic" else "Professional")
             html += f'<div class="isr-skills-row"><span class="isr-skills-label">{prof_label}:</span> {" · ".join(skills_data["PROFESSIONAL"])}</div>'
 
-    # 4. PROJECTS
-    if cv_data.get("projects"):
-        html += sec(h[4])
-        html += render_entries_html(cv_data["projects"])
-
-    # 5. EXPERIENCE
-    if cv_data.get("experience"):
-        html += sec(h[3])
-        html += render_entries_html(cv_data["experience"])
-
-    # 6. VOLUNTEERING / LEADERSHIP
+    # 6. VOLUNTEERING / AWARDS / LEADERSHIP
     if cv_data.get("volunteering"):
         html += sec(h[6])
         vol = re.sub(r'^\s*[&\*]\s*$', '', cv_data["volunteering"], flags=re.MULTILINE)
@@ -2167,10 +2195,21 @@ elif current_tab == 1:
             st.session_state.cv_full_text = "\n".join(st.session_state.manual_cv_data.values())
             st.session_state.cv_uploaded = True
 
-    cv_ready = bool(
-        st.session_state.cv_full_text.strip() or
-        any(v.strip() for v in st.session_state.manual_cv_data.values())
-    )
+    if method == "Paste Text":
+        pasted_text = st.session_state.cv_full_text.strip()
+        if not pasted_text:
+            st.error("⚠️ Please paste your CV text before continuing.")
+            cv_ready = False
+        elif len(pasted_text) < 50:
+            st.error(f"⚠️ CV text is too short ({len(pasted_text)} characters). Please paste your full resume — minimum 50 characters.")
+            cv_ready = False
+        else:
+            cv_ready = True
+    else:
+        cv_ready = bool(
+            st.session_state.cv_full_text.strip() or
+            any(v.strip() for v in st.session_state.manual_cv_data.values())
+        )
     nav_buttons(1, can_proceed=cv_ready, proceed_label="Continue →")
 
 
@@ -2431,6 +2470,13 @@ elif current_tab == 4:
     st.markdown('<div class="rp-page-sub">Your tailored resume. Choose output language and review before downloading.</div>', unsafe_allow_html=True)
 
     lang = st.radio("Output language:", ["English","Hebrew","Arabic"], horizontal=True, key="lang_select")
+    if lang != st.session_state.active_lang:
+        st.session_state.active_lang = lang
+        st.markdown(
+            "<script>window.parent.document.querySelector('.main').scrollTo(0,0);</script>",
+            unsafe_allow_html=True,
+        )
+        st.rerun()
     st.session_state.active_lang = lang
 
     # ── Get base CV sections ──
@@ -2465,7 +2511,14 @@ elif current_tab == 4:
                         fallback["summary"] = f"Motivated professional targeting a {st.session_state.job_role} role. " + fallback["summary"]
                 st.session_state.adjusted_cv_data = fallback
                 st.session_state.cv_adjusted = True
-                st.info("ℹ️ Showing CV with basic improvements (AI tailoring unavailable).")
+                if get_anthropic_api_key() is None:
+                    st.error(
+                        "⚠️ **ANTHROPIC_API_KEY not found.** "
+                        "Add it to `.streamlit/secrets.toml` as `ANTHROPIC_API_KEY = \"sk-ant-...\"` "
+                        "to enable AI tailoring. Showing your CV with basic improvements for now."
+                    )
+                else:
+                    st.warning("⚠️ AI tailoring failed (API error). Showing your CV with basic improvements.")
 
         english_cv = st.session_state.adjusted_cv_data or base_data
 
