@@ -43,6 +43,7 @@ defaults = {
     'improvement_log': [],          # Step 10: [{type, section, description}]
     'final_cv_data': {},
     'adjusted_cv_data': {},
+    'career_recommendations': {},   # Low-match gap analysis / roadmap
     'active_lang': "English",
     'cv_uploaded': False,
     'analysis_done': False,
@@ -912,7 +913,7 @@ Generate exactly 5-8 questions. Every question must be specific to THIS person's
 
 
 # ── STEPS 5-10: Full CV Rewrite — ATS, Summary, Bullets, Localization Prep ──
-def call_claude_rewrite_cv(cv_sections, job_role, job_desc, ai_analysis, follow_up_answers):
+def call_claude_rewrite_cv(cv_sections, job_role, job_desc, ai_analysis, follow_up_answers, match_tier="high"):
     """
     Steps 5-10: True CV reconstruction using original CV + job description
     + all user answers. Produces professional-recruiter-quality output.
@@ -935,7 +936,25 @@ def call_claude_rewrite_cv(cv_sections, job_role, job_desc, ai_analysis, follow_
     strengths    = (ai_analysis or {}).get("cv_strengths", [])[:5]
     hard_skills  = (ai_analysis or {}).get("hard_skills_required", [])[:8]
 
+    tier_instructions = ""
+    if match_tier == "medium":
+        tier_instructions = """
+MATCH TIER: MEDIUM (35–69%)
+This CV partially matches the job. Apply these honesty constraints:
+- Only strengthen sections where the candidate's background genuinely overlaps with the job
+- Do NOT force ATS keywords into bullets where they don't naturally apply
+- If a required skill is completely absent from the CV (and not mentioned in user answers), leave it out entirely — do not invent or imply it
+- Where there are real matches, make those shine clearly
+- Write the summary to highlight what genuinely aligns, without overclaiming on the gaps
+"""
+    else:
+        tier_instructions = """
+MATCH TIER: HIGH (70%+)
+Strong match. Rewrite the CV fully and confidently to target this role. Inject ATS keywords wherever they naturally apply.
+"""
+
     prompt = f"""You are a professional CV writer with 15 years of experience placing candidates at top companies. Rewrite this CV to be a compelling, targeted application. Think like a human recruiter reading hundreds of CVs — make this one stand out.
+{tier_instructions}
 
 TARGET ROLE: {job_role}
 
@@ -1004,6 +1023,81 @@ Return ONLY valid JSON (no markdown fences, no preamble, no explanation):
 }}"""
 
     raw = claude_api_call(prompt, max_tokens=4500)
+    return parse_json_response(raw)
+
+
+# ── MATCH TIER HELPER ──
+def get_match_tier(score):
+    """Classify a match score into high / medium / low tier."""
+    if score >= 70:
+        return "high"
+    if score >= 35:
+        return "medium"
+    return "low"
+
+
+# ── LOW-MATCH: Career Gap Analysis & Roadmap ──
+def call_claude_career_recommendations(cv_sections, job_role, job_desc, ai_analysis):
+    """
+    For low-match CVs (< 35%): instead of rewriting, produce an honest
+    gap analysis and actionable career development roadmap.
+    Returns structured dict or None.
+    """
+    sections_text = build_sections_text(cv_sections)
+    missing_skills = (ai_analysis or {}).get("ats_keywords_missing", [])[:10]
+    weaknesses     = (ai_analysis or {}).get("cv_weaknesses", [])[:6]
+    match_score    = (ai_analysis or {}).get("match_score", 0)
+
+    prompt = f"""You are a career counselor. This candidate's CV scored {match_score}% against a job — a low match. Do NOT rewrite or spin the CV to fit. Give honest, specific, actionable career development advice.
+
+TARGET ROLE: {job_role}
+
+JOB DESCRIPTION:
+{job_desc[:1500]}
+
+CANDIDATE'S CURRENT CV:
+{sections_text[:2500]}
+
+IDENTIFIED GAPS:
+- Missing skills: {', '.join(missing_skills) or 'see analysis'}
+- CV weaknesses for this role: {', '.join(weaknesses) or 'see analysis'}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{{
+  "why_low_match": "2-3 sentence honest explanation of the core mismatch between this CV and the job requirements",
+  "critical_missing_skills": ["Most important missing skill", "Second most important", "Third"],
+  "nice_to_have_missing": ["Secondary missing skill", "another"],
+  "recommended_projects": [
+    {{
+      "title": "Project name",
+      "description": "What to build and how — 1-2 sentences, specific to the job's stack",
+      "skills_gained": ["skill1", "skill2"],
+      "difficulty": "Beginner",
+      "estimated_time": "2-4 weeks"
+    }}
+  ],
+  "recommended_courses": [
+    {{
+      "name": "Course or resource name",
+      "platform": "Coursera / YouTube / Udemy / freeCodeCamp / etc",
+      "skills_gained": ["skill1"],
+      "free": true
+    }}
+  ],
+  "recommended_certifications": [
+    {{
+      "name": "Certification name",
+      "why_relevant": "How it directly addresses a specific job requirement"
+    }}
+  ],
+  "what_is_strong": "1-2 sentences about what the candidate does have going for them — be genuine",
+  "realistic_timeline": "e.g., 3-6 months of focused work to become competitive for this role",
+  "better_fit_roles": ["Role that better matches the current CV", "Another suitable alternative role"]
+}}
+
+Be specific and reference the actual CV content and job requirements. No generic advice."""
+
+    raw = claude_api_call(prompt, max_tokens=2000)
     return parse_json_response(raw)
 
 
@@ -2070,11 +2164,12 @@ def go_to(tab_index):
         # Back before Refinement — wipe dynamic questions
         st.session_state.dynamic_questions = []
     if tab_index < 4:
-        # Back before Preview — wipe rewrite output
+        # Back before Preview — wipe rewrite output and career recs
         st.session_state.cv_adjusted = False
         st.session_state.adjusted_cv_data = {}
         st.session_state.final_cv_data = {}
         st.session_state.improvement_log = []
+        st.session_state.career_recommendations = {}
     st.rerun()
 
 LOGO_SVG = """<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2638,12 +2733,38 @@ elif current_tab == 3:
         nav_buttons(3, can_proceed=False)
     else:
         score = st.session_state.analysis_results.get("score", 0)
-        if score >= 70:
+        tier  = get_match_tier(score)
+
+        if tier == "high":
             st.success(f"🎉 Your CV scores **{score}%** — strong match. Answer below to make it even sharper.")
-        elif score >= 40:
-            st.warning(f"Your CV scores **{score}%**. These answers will help fill the gaps.")
+        elif tier == "medium":
+            st.warning(f"Your CV scores **{score}%** — partial match. Answer honestly below. Only real experience will be used in the rewrite.")
         else:
-            st.error(f"Your CV scores **{score}%**. Be specific in your answers — they'll significantly improve the rewrite.")
+            # Low match — skip the refinement questions entirely
+            st.markdown(f"""
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:1.4rem 1.6rem;margin-bottom:1.2rem;">
+                <div style="font-size:1.05rem;font-weight:700;color:#be123c;margin-bottom:8px;">⚠️ Low Match — {score}%</div>
+                <div style="font-size:0.92rem;color:#7f1d1d;line-height:1.65;">
+                    Your CV doesn't overlap enough with this role for honest tailoring.<br>
+                    Rewriting it to "fit" would mean exaggerating or fabricating experience — which ResumePilot won't do.<br><br>
+                    <strong>Instead, the next step will show you a career development roadmap:</strong> what skills are missing,
+                    which projects or courses would close the gap, and which roles you're better positioned for right now.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            ats_missing = st.session_state.ai_cv_analysis.get("ats_keywords_missing", [])
+            better_roles = st.session_state.ai_cv_analysis.get("quick_wins", [])
+            if ats_missing:
+                chips = " ".join(
+                    f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
+                    f'border-radius:9999px;font-size:0.8rem;margin:2px;">{k}</span>'
+                    for k in ats_missing[:10]
+                )
+                st.markdown(f'<div style="margin-bottom:12px;"><strong style="font-size:0.85rem;color:#64748b;">Skills gap at a glance:</strong><br>{chips}</div>', unsafe_allow_html=True)
+
+            nav_buttons(3, can_proceed=True, proceed_label="Next: See Career Roadmap →")
+            st.stop()
 
         st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
@@ -2771,121 +2892,323 @@ elif current_tab == 4:
         st.warning("⚠️ No CV content found. Please go back to **CV Content** and add your information.")
         nav_buttons(4, can_proceed=False)
     else:
-        # ── Steps 5-10: Full CV Rewrite (English, run once per session) ──
-        if not st.session_state.cv_adjusted:
-            with st.spinner("✨ Rewriting your CV for this role... (~20 seconds)"):
-                rewrite_result = call_claude_rewrite_cv(
-                    base_data,
-                    st.session_state.job_role,
-                    st.session_state.job_desc,
-                    st.session_state.ai_cv_analysis,
-                    st.session_state.follow_up_answers,
-                )
+        score = st.session_state.analysis_results.get("score", 0)
+        tier  = get_match_tier(score)
 
-            if rewrite_result:
-                # Extract improvement_log from the rewrite response (Step 10)
-                improvement_log = rewrite_result.pop("improvement_log", [])
-                st.session_state.improvement_log = improvement_log if isinstance(improvement_log, list) else []
+        # ══════════════════════════════════════════
+        # LOW MATCH — Career Roadmap, no CV rewrite
+        # ══════════════════════════════════════════
+        if tier == "low":
+            st.markdown(f"""
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:1.2rem 1.6rem;margin-bottom:1.4rem;">
+                <div style="font-size:1rem;font-weight:700;color:#c2410c;margin-bottom:6px;">📊 Match Score: {score}% — Career Gap Analysis Mode</div>
+                <div style="font-size:0.9rem;color:#7c2d12;line-height:1.6;">
+                    This CV doesn't match the role well enough for tailoring without exaggerating your background.
+                    Below is an honest breakdown of what's missing and a concrete roadmap to close the gap.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                st.session_state.adjusted_cv_data = build_final_cv(base_data, rewrite_result, st.session_state.job_role)
-                st.session_state.cv_adjusted = True
-            else:
-                # Fallback: use original CV with minimal improvement
-                fallback = base_data.copy()
-                if st.session_state.job_role and fallback.get("summary"):
-                    if st.session_state.job_role.lower() not in fallback["summary"].lower():
-                        fallback["summary"] = (
-                            f"Motivated professional targeting a {st.session_state.job_role} role. "
-                            + fallback["summary"]
-                        )
-                st.session_state.adjusted_cv_data = fallback
-                st.session_state.cv_adjusted = True
-                st.session_state.improvement_log = []
-                if get_anthropic_api_key() is None:
-                    st.error(
-                        "⚠️ **ANTHROPIC_API_KEY not found.** "
-                        "Add it to `.streamlit/secrets.toml` as `ANTHROPIC_API_KEY = \"sk-ant-...\"` "
-                        "to enable AI rewriting. Showing your original CV for now."
+            # Generate career recommendations (once per session)
+            if not st.session_state.career_recommendations:
+                with st.spinner("🔍 Analyzing gaps and building your career roadmap... (~15 seconds)"):
+                    recs = call_claude_career_recommendations(
+                        base_data,
+                        st.session_state.job_role,
+                        st.session_state.job_desc,
+                        st.session_state.ai_cv_analysis,
                     )
+                if recs:
+                    st.session_state.career_recommendations = recs
                 else:
-                    st.warning("⚠️ AI rewrite failed (API error). Showing your original CV.")
+                    st.session_state.career_recommendations = {"_fallback": True}
+                    st.warning("⚠️ Could not generate AI recommendations. Showing gap analysis from the Analysis tab.")
 
-        english_cv = st.session_state.adjusted_cv_data or base_data
+            recs = st.session_state.career_recommendations
 
-        # ── Step 9: Localization for Hebrew / Arabic ──
-        if lang in ["Hebrew", "Arabic"]:
-            cache_key = f"translated_{lang}"
-            cached = st.session_state.get(cache_key, {})
-            if not cached:
-                with st.spinner(f"🌐 Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
-                    localized = call_claude_localize_cv(english_cv, lang)
-                st.session_state[cache_key] = localized
-                final_cv = localized
+            if recs and not recs.get("_fallback"):
+                # ── Why it's a low match ──
+                if recs.get("why_low_match"):
+                    st.markdown(f"""
+                    <div style="background:#fef2f2;border-left:4px solid #ef4444;border-radius:0 10px 10px 0;
+                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#7f1d1d;line-height:1.6;">
+                        <strong>Why the low match:</strong> {recs['why_low_match']}
+                    </div>""", unsafe_allow_html=True)
+
+                # ── What is strong ──
+                if recs.get("what_is_strong"):
+                    st.markdown(f"""
+                    <div style="background:#f0fdf4;border-left:4px solid #22c55e;border-radius:0 10px 10px 0;
+                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#14532d;line-height:1.6;">
+                        <strong>What you do have:</strong> {recs['what_is_strong']}
+                    </div>""", unsafe_allow_html=True)
+
+                col_crit, col_nice = st.columns(2)
+
+                # ── Missing skills ──
+                with col_crit:
+                    critical = recs.get("critical_missing_skills", [])
+                    if critical:
+                        st.markdown("**🔴 Critical missing skills**")
+                        for s in critical:
+                            st.markdown(f'<div style="background:#fee2e2;border-radius:6px;padding:6px 12px;'
+                                        f'margin-bottom:4px;font-size:0.87rem;color:#991b1b;">✗ {s}</div>',
+                                        unsafe_allow_html=True)
+
+                with col_nice:
+                    nice = recs.get("nice_to_have_missing", [])
+                    if nice:
+                        st.markdown("**🟡 Nice-to-have gaps**")
+                        for s in nice:
+                            st.markdown(f'<div style="background:#fef9c3;border-radius:6px;padding:6px 12px;'
+                                        f'margin-bottom:4px;font-size:0.87rem;color:#713f12;">◎ {s}</div>',
+                                        unsafe_allow_html=True)
+
+                st.markdown("<div style='margin-bottom:1.2rem;'></div>", unsafe_allow_html=True)
+
+                # ── Recommended projects ──
+                projects = recs.get("recommended_projects", [])
+                if projects:
+                    st.markdown("**🛠️ Projects to build**")
+                    for p in projects:
+                        skills_str = " · ".join(p.get("skills_gained", []))
+                        st.markdown(f"""
+                        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
+                            padding:12px 16px;margin-bottom:8px;">
+                            <div style="font-weight:700;font-size:0.92rem;color:#0c4a6e;">{p.get('title','')}</div>
+                            <div style="font-size:0.85rem;color:#0369a1;margin:4px 0;">{p.get('description','')}</div>
+                            <div style="font-size:0.78rem;color:#64748b;">
+                                Skills: {skills_str} &nbsp;·&nbsp; {p.get('difficulty','')} &nbsp;·&nbsp; {p.get('estimated_time','')}
+                            </div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Recommended courses ──
+                courses = recs.get("recommended_courses", [])
+                if courses:
+                    st.markdown("**📚 Courses to take**")
+                    for c in courses:
+                        free_badge = '<span style="background:#dcfce7;color:#166534;padding:1px 7px;border-radius:9999px;font-size:0.75rem;font-weight:600;margin-left:6px;">FREE</span>' if c.get("free") else ""
+                        skills_str = " · ".join(c.get("skills_gained", []))
+                        st.markdown(f"""
+                        <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;
+                            padding:10px 14px;margin-bottom:6px;font-size:0.87rem;">
+                            <strong>{c.get('name','')}</strong>{free_badge}
+                            <span style="color:#64748b;margin-left:8px;">{c.get('platform','')}</span>
+                            <div style="color:#64748b;font-size:0.8rem;margin-top:2px;">Covers: {skills_str}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Certifications ──
+                certs = recs.get("recommended_certifications", [])
+                if certs:
+                    st.markdown("**🏅 Certifications worth getting**")
+                    for cert in certs:
+                        st.markdown(f"""
+                        <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;
+                            padding:10px 14px;margin-bottom:6px;font-size:0.87rem;">
+                            <strong>{cert.get('name','')}</strong>
+                            <div style="color:#64748b;font-size:0.8rem;margin-top:2px;">{cert.get('why_relevant','')}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                # ── Timeline + better fit roles ──
+                col_t, col_r = st.columns(2)
+                with col_t:
+                    if recs.get("realistic_timeline"):
+                        st.markdown(f"""
+                        <div style="background:#f1f5f9;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
+                            <strong>⏱️ Realistic timeline</strong><br>
+                            <span style="color:#475569;">{recs['realistic_timeline']}</span>
+                        </div>""", unsafe_allow_html=True)
+                with col_r:
+                    better_roles = recs.get("better_fit_roles", [])
+                    if better_roles:
+                        roles_html = "".join(
+                            f'<div style="background:#eff6ff;color:#1d4ed8;padding:4px 12px;'
+                            f'border-radius:9999px;font-size:0.82rem;margin-bottom:4px;display:inline-block;margin-right:4px;">{r}</div>'
+                            for r in better_roles
+                        )
+                        st.markdown(f"""
+                        <div style="background:#f1f5f9;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
+                            <strong>✅ Better-fit roles right now</strong><br><br>{roles_html}
+                        </div>""", unsafe_allow_html=True)
+
+            st.markdown("<div style='margin-bottom:1.4rem;'></div>", unsafe_allow_html=True)
+
+            # ── Re-run button ──
+            col_regen, _ = st.columns([1, 4])
+            with col_regen:
+                if st.button("🔄 Re-generate Roadmap"):
+                    st.session_state.career_recommendations = {}
+                    st.rerun()
+
+            # ── Still show the original CV (formatted, not rewritten) ──
+            st.markdown("---")
+            st.markdown("**Your original CV (formatted, not rewritten):**")
+            st.caption("We didn't change the content — only applied formatting so you can still download it.")
+            st.session_state.final_cv_data = base_data   # original, no rewrite
+
+            if lang in ["Hebrew", "Arabic"]:
+                cache_key = f"translated_{lang}"
+                cached = st.session_state.get(cache_key, {})
+                if not cached:
+                    with st.spinner(f"🌐 Formatting CV in {'Hebrew' if lang == 'Hebrew' else 'Arabic'}..."):
+                        localized = call_claude_localize_cv(base_data, lang)
+                    st.session_state[cache_key] = localized
+                    display_cv = localized
+                else:
+                    display_cv = cached
             else:
-                final_cv = cached
+                display_cv = base_data
+
+            st.session_state.final_cv_data = display_cv
+
+            st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;margin-top:12px;">', unsafe_allow_html=True)
+            st.markdown(render_cv_html(display_cv, lang), unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            nav_buttons(4, can_proceed=True, proceed_label="Next: Download →")
+
+        # ══════════════════════════════════════════════════════════
+        # MEDIUM or HIGH MATCH — CV Rewrite (honest for medium)
+        # ══════════════════════════════════════════════════════════
         else:
-            final_cv = english_cv
-
-        st.session_state.final_cv_data = final_cv
-
-        # ── Step 10: Improvement Log ──
-        improvement_log = st.session_state.improvement_log
-        if improvement_log:
-            with st.expander(f"📋 What changed in your CV ({len(improvement_log)} improvements)", expanded=False):
-                type_colors = {
-                    "Added":       ("#dcfce7", "#166534", "✅"),
-                    "Improved":    ("#dbeafe", "#1e40af", "✏️"),
-                    "Reorganized": ("#fef9c3", "#713f12", "🔀"),
-                }
-                for item in improvement_log:
-                    itype   = item.get("type", "Improved")
-                    section = item.get("section", "")
-                    desc    = item.get("description", "")
-                    bg, fg, icon = type_colors.get(itype, ("#f1f5f9", "#334155", "•"))
-                    st.markdown(
-                        f'<div style="background:{bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.88rem;color:{fg};">'
-                        f'<strong>{icon} {itype}</strong> — <em>{section}</em>: {desc}</div>',
-                        unsafe_allow_html=True
+            # ── Steps 5-10: Full CV Rewrite (English, run once per session) ──
+            if not st.session_state.cv_adjusted:
+                spinner_msg = (
+                    "✨ Rewriting your CV for this role... (~20 seconds)"
+                    if tier == "high"
+                    else "✨ Tailoring the matching parts of your CV honestly... (~20 seconds)"
+                )
+                with st.spinner(spinner_msg):
+                    rewrite_result = call_claude_rewrite_cv(
+                        base_data,
+                        st.session_state.job_role,
+                        st.session_state.job_desc,
+                        st.session_state.ai_cv_analysis,
+                        st.session_state.follow_up_answers,
+                        match_tier=tier,
                     )
-        elif st.session_state.cv_adjusted:
-            # Show summary comparison if no structured log
-            original_summary = base_data.get("summary", "")
-            adjusted_summary = english_cv.get("summary", "")
-            if original_summary and adjusted_summary and original_summary.strip() != adjusted_summary.strip():
-                with st.expander("👀 Summary — before vs. after"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown("**Original:**")
-                        st.markdown(f'<div style="background:#fff1f2;padding:12px;border-radius:8px;font-size:0.88rem;color:#334155;">{original_summary}</div>', unsafe_allow_html=True)
-                    with c2:
-                        st.markdown("**Rewritten:**")
-                        st.markdown(f'<div style="background:#f0fdf4;padding:12px;border-radius:8px;font-size:0.88rem;color:#166534;">{adjusted_summary}</div>', unsafe_allow_html=True)
 
-        # ── Regenerate button ──
-        col_regen, _ = st.columns([1,4])
-        with col_regen:
-            if st.button("🔄 Re-generate CV"):
-                st.session_state.cv_adjusted = False
-                st.session_state.adjusted_cv_data = {}
-                st.session_state.final_cv_data = {}
-                st.session_state.improvement_log = []
-                for k in ["translated_Hebrew", "translated_Arabic"]:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.rerun()
+                if rewrite_result:
+                    improvement_log = rewrite_result.pop("improvement_log", [])
+                    st.session_state.improvement_log = improvement_log if isinstance(improvement_log, list) else []
+                    st.session_state.adjusted_cv_data = build_final_cv(base_data, rewrite_result, st.session_state.job_role)
+                    st.session_state.cv_adjusted = True
+                else:
+                    fallback = base_data.copy()
+                    if st.session_state.job_role and fallback.get("summary"):
+                        if st.session_state.job_role.lower() not in fallback["summary"].lower():
+                            fallback["summary"] = (
+                                f"Motivated professional targeting a {st.session_state.job_role} role. "
+                                + fallback["summary"]
+                            )
+                    st.session_state.adjusted_cv_data = fallback
+                    st.session_state.cv_adjusted = True
+                    st.session_state.improvement_log = []
+                    if get_anthropic_api_key() is None:
+                        st.error(
+                            "⚠️ **ANTHROPIC_API_KEY not found.** "
+                            "Add it to `.streamlit/secrets.toml` as `ANTHROPIC_API_KEY = \"sk-ant-...\"` "
+                            "to enable AI rewriting. Showing your original CV for now."
+                        )
+                    else:
+                        st.warning("⚠️ AI rewrite failed (API error). Showing your original CV.")
 
-        st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
+            english_cv = st.session_state.adjusted_cv_data or base_data
 
-        # ── CV Preview ──
-        st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;">', unsafe_allow_html=True)
-        st.markdown(render_cv_html(final_cv, lang), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            # ── Medium match: show missing skills warning ──
+            if tier == "medium":
+                missing_skills = st.session_state.ai_cv_analysis.get("ats_keywords_missing", [])
+                if missing_skills:
+                    chips = " ".join(
+                        f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
+                        f'border-radius:9999px;font-size:0.78rem;margin:2px;">{k}</span>'
+                        for k in missing_skills[:10]
+                    )
+                    st.markdown(f"""
+                    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;
+                        padding:12px 16px;margin-bottom:1rem;">
+                        <div style="font-weight:700;font-size:0.9rem;color:#c2410c;margin-bottom:6px;">
+                            ⚠️ Partial match ({score}%) — only real overlaps were tailored
+                        </div>
+                        <div style="font-size:0.82rem;color:#78350f;margin-bottom:8px;">
+                            These skills are required by the job but absent from your CV.
+                            They were <strong>not added</strong> to avoid dishonesty — consider building them before applying:
+                        </div>
+                        {chips}
+                    </div>""", unsafe_allow_html=True)
 
-        st.markdown('<div style="margin-top:1rem;padding:1rem;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;">', unsafe_allow_html=True)
-        st.markdown("✅ **Your tailored CV is ready!** Download it in the next tab.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            # ── Step 9: Localization for Hebrew / Arabic ──
+            if lang in ["Hebrew", "Arabic"]:
+                cache_key = f"translated_{lang}"
+                cached = st.session_state.get(cache_key, {})
+                if not cached:
+                    with st.spinner(f"🌐 Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
+                        localized = call_claude_localize_cv(english_cv, lang)
+                    st.session_state[cache_key] = localized
+                    final_cv = localized
+                else:
+                    final_cv = cached
+            else:
+                final_cv = english_cv
 
-        nav_buttons(4, can_proceed=True, proceed_label="Next: Download →")
+            st.session_state.final_cv_data = final_cv
+
+            # ── Step 10: Improvement Log ──
+            improvement_log = st.session_state.improvement_log
+            if improvement_log:
+                with st.expander(f"📋 What changed in your CV ({len(improvement_log)} improvements)", expanded=False):
+                    type_colors = {
+                        "Added":       ("#dcfce7", "#166534", "✅"),
+                        "Improved":    ("#dbeafe", "#1e40af", "✏️"),
+                        "Reorganized": ("#fef9c3", "#713f12", "🔀"),
+                    }
+                    for item in improvement_log:
+                        itype   = item.get("type", "Improved")
+                        section = item.get("section", "")
+                        desc    = item.get("description", "")
+                        bg, fg, icon = type_colors.get(itype, ("#f1f5f9", "#334155", "•"))
+                        st.markdown(
+                            f'<div style="background:{bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.88rem;color:{fg};">'
+                            f'<strong>{icon} {itype}</strong> — <em>{section}</em>: {desc}</div>',
+                            unsafe_allow_html=True
+                        )
+            elif st.session_state.cv_adjusted:
+                original_summary = base_data.get("summary", "")
+                adjusted_summary = english_cv.get("summary", "")
+                if original_summary and adjusted_summary and original_summary.strip() != adjusted_summary.strip():
+                    with st.expander("👀 Summary — before vs. after"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown("**Original:**")
+                            st.markdown(f'<div style="background:#fff1f2;padding:12px;border-radius:8px;font-size:0.88rem;color:#334155;">{original_summary}</div>', unsafe_allow_html=True)
+                        with c2:
+                            st.markdown("**Rewritten:**")
+                            st.markdown(f'<div style="background:#f0fdf4;padding:12px;border-radius:8px;font-size:0.88rem;color:#166534;">{adjusted_summary}</div>', unsafe_allow_html=True)
+
+            # ── Regenerate button ──
+            col_regen, _ = st.columns([1, 4])
+            with col_regen:
+                if st.button("🔄 Re-generate CV"):
+                    st.session_state.cv_adjusted = False
+                    st.session_state.adjusted_cv_data = {}
+                    st.session_state.final_cv_data = {}
+                    st.session_state.improvement_log = []
+                    for k in ["translated_Hebrew", "translated_Arabic"]:
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    st.rerun()
+
+            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
+
+            # ── CV Preview ──
+            st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;">', unsafe_allow_html=True)
+            st.markdown(render_cv_html(final_cv, lang), unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            ready_msg = "✅ **Your tailored CV is ready!**" if tier == "high" else "✅ **Your CV is ready** — only genuine overlaps with the job were strengthened."
+            st.markdown(f'<div style="margin-top:1rem;padding:1rem;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;">{ready_msg} Download it in the next tab.</div>', unsafe_allow_html=True)
+
+            nav_buttons(4, can_proceed=True, proceed_label="Next: Download →")
 
 
 # ============================================================
@@ -2895,7 +3218,15 @@ elif current_tab == 4:
 elif current_tab == 5:
     st.markdown('<div class="rp-page-badge">STEP 6 OF 6</div>', unsafe_allow_html=True)
     st.markdown('<div class="rp-page-title">Download</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Your tailored resume is ready to send.</div>', unsafe_allow_html=True)
+    _export_score = st.session_state.analysis_results.get("score", 0)
+    _export_sub = (
+        "Your tailored CV is ready to send."
+        if get_match_tier(_export_score) == "high"
+        else "Your partially tailored CV is ready — review carefully before sending."
+        if get_match_tier(_export_score) == "medium"
+        else "Your original CV with clean formatting — read the notes below before applying."
+    )
+    st.markdown(f'<div class="rp-page-sub">{_export_sub}</div>', unsafe_allow_html=True)
 
     cv_f = st.session_state.final_cv_data
     has_content = bool(cv_f and any(v.strip() for v in cv_f.values()))
@@ -2905,12 +3236,40 @@ elif current_tab == 5:
         nav_buttons(5, can_proceed=False)
     else:
         active_lang = st.session_state.active_lang
-
-        # Score badge
         score = st.session_state.analysis_results.get("score", 0)
+        tier  = get_match_tier(score)
+
+        # Score badge + tier-specific message
         if score:
-            score_class = "alert-green" if score >= 70 else "alert-orange" if score >= 40 else "alert-red"
+            score_class = "alert-green" if tier == "high" else "alert-orange" if tier == "medium" else "alert-red"
             st.markdown(f'<div class="alert-box {score_class}">Match Score: {score}% for {st.session_state.job_role}</div>', unsafe_allow_html=True)
+
+        if tier == "low":
+            st.markdown("""
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;
+                padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#7c2d12;line-height:1.65;">
+                ⚠️ <strong>Heads up:</strong> Your CV didn't match this role well enough for tailoring.
+                What you're downloading is your <strong>original CV with clean formatting applied</strong> — the content was not rewritten to fit this job.<br><br>
+                Go back to the <strong>Preview</strong> tab to see your career roadmap and the skills you need to build before applying to this role.
+            </div>
+            """, unsafe_allow_html=True)
+        elif tier == "medium":
+            missing = st.session_state.ai_cv_analysis.get("ats_keywords_missing", [])
+            missing_str = ", ".join(missing[:5]) if missing else "some required skills"
+            st.markdown(f"""
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;
+                padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#78350f;line-height:1.65;">
+                ℹ️ <strong>Partial match:</strong> Only the sections where your background genuinely overlaps with this role were strengthened.
+                Skills you don't have ({missing_str}) were <strong>not added</strong> — don't claim them in interviews.
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;
+                padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#14532d;line-height:1.65;">
+                ✅ <strong>Strong match:</strong> Your CV has been fully tailored for this role. Review every line before sending.
+            </div>
+            """, unsafe_allow_html=True)
 
         # File name
         pd_raw = cv_f.get("personal_details","Candidate")
