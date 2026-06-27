@@ -775,7 +775,6 @@ def claude_api_call(prompt, max_tokens=3000):
 
 
 def parse_json_response(text):
-    """Strip code fences and parse JSON from a Claude response."""
     if not text:
         return None
     text = re.sub(r'```(?:json)?\s*', '', text).strip().strip('`').strip()
@@ -786,6 +785,14 @@ def parse_json_response(text):
         if m:
             try:
                 return json.loads(m.group())
+            except Exception:
+                pass
+        m = re.search(r'\[[\s\S]*\]', text)
+        if m:
+            try:
+                arr = json.loads(m.group())
+                if isinstance(arr, list):
+                    return {"questions": arr}
             except Exception:
                 pass
     return None
@@ -909,6 +916,8 @@ Generate exactly 5-8 questions. Every question must be specific to THIS person's
     result = parse_json_response(raw)
     if result and isinstance(result.get("questions"), list):
         return result["questions"]
+    if raw:
+        st.session_state['_last_api_error'] = f"JSON parse failed. Preview: {raw[:120]}"
     return []
 
 
