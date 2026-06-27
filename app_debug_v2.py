@@ -777,7 +777,10 @@ def claude_api_call(prompt, max_tokens=3000):
 def parse_json_response(text):
     if not text:
         return None
-    text = re.sub(r'```(?:json)?\s*', '', text).strip().strip('`').strip()
+    # Strip code fences more aggressively
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    text = text.strip().strip('`').strip()
     try:
         return json.loads(text)
     except Exception:
