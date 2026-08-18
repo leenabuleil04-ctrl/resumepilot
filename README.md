@@ -9,7 +9,7 @@
 
 ## What It Does
 
-ResumePilot takes a job description and a candidate's CV, runs them through a 6-step AI pipeline powered by Claude, and outputs a professionally rewritten, ATS-optimized resume in English, Hebrew, or Arabic — without inventing any experience the candidate doesn't have.
+ResumePilot takes a job description and a candidate's CV, runs them through an 11-step AI pipeline powered by Claude, and outputs a professionally rewritten, ATS-optimized resume in English, Hebrew, or Arabic — without inventing any experience the candidate doesn't have.
 
 ---
 
