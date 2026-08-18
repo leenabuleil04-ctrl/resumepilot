@@ -915,11 +915,32 @@ Return ONLY JSON:
 
 Generate exactly 5-8 questions. Every question must be specific to THIS person's CV."""
 
-    raw = claude_api_call(prompt, max_tokens=1500)
+    # NOTE: 1500 tokens was too tight for 5-8 questions (each with key,
+    # question, hint, section, gap_addressed) plus the ```json fence —
+    # Claude was hitting the token limit mid-response, which cut the JSON
+    # off before it was valid (e.g. mid-string), causing "JSON parse
+    # failed" and falling back to the generic questions. Bumped the
+    # budget so full responses fit.
+    raw = claude_api_call(prompt, max_tokens=3000)
     result = parse_json_response(raw)
     if result and isinstance(result.get("questions"), list):
         return result["questions"]
+
+    # If it still failed (e.g. still truncated), try salvaging whatever
+    # complete question objects are present in the partial JSON instead
+    # of throwing everything away.
     if raw:
+        salvaged = re.findall(r'\{\s*"key"\s*:\s*".*?\}\s*(?=,|\])', raw, flags=re.S)
+        questions = []
+        for chunk in salvaged:
+            try:
+                q = json.loads(chunk)
+                if isinstance(q, dict) and q.get("key") and q.get("question"):
+                    questions.append(q)
+            except Exception:
+                continue
+        if questions:
+            return questions
         st.session_state['_last_api_error'] = f"JSON parse failed. Preview: {raw[:120]}"
     return []
 
@@ -1796,6 +1817,15 @@ def render_cv_html(cv_data, lang="English"):
         html += '<ul class="isr-bullets">' + ''.join(f'<li>{i}</li>' for i in items) + '</ul>'
 
     html += '</div>'
+
+    # IMPORTANT: strip leading whitespace from every line before returning.
+    # Streamlit's markdown renderer treats any line starting with 4+ spaces
+    # as an indented code block (standard CommonMark behaviour), which is
+    # exactly what was happening here — the CSS/HTML was being shown as
+    # raw text instead of being rendered, because it started with 4 spaces
+    # of indentation. Stripping leading whitespace is harmless for
+    # HTML/CSS (browsers ignore it outside <pre> tags) and fixes the bug.
+    html = re.sub(r'(?m)^[ \t]+', '', html)
     return html
 
 
