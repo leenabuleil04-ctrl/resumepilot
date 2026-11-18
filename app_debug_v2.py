@@ -745,10 +745,101 @@ def get_anthropic_api_key():
 # CORE AI PIPELINE — 11-STEP CV TAILORING ENGINE
 # ============================================================
 
+# ============================================================
+# USAGE LIMITS — protect the owner's API key from overuse
+# ============================================================
+# Every Claude call costs money. These limits cap how many calls one
+# visitor, and the whole app, can make per day. A full CV run uses about
+# 5 calls. Override the defaults in Streamlit secrets:
+#   PER_USER_DAILY_CALLS = 15
+#   GLOBAL_DAILY_CALLS   = 200
+# Counts are kept in server memory and reset at midnight (Israel time)
+# or when the app restarts.
+
+DEFAULT_PER_USER_DAILY_CALLS = 15
+DEFAULT_GLOBAL_DAILY_CALLS = 200
+LIMIT_REACHED_USER_MSG = (
+    "You've reached today's free limit for AI features. "
+    "The app will keep working with basic (non-AI) analysis. Try again tomorrow."
+)
+LIMIT_REACHED_GLOBAL_MSG = (
+    "ResumePilot has reached its daily AI limit for all users. "
+    "The app will keep working with basic (non-AI) analysis. Try again tomorrow."
+)
+
+
+def _get_limit(name, default):
+    try:
+        return int(st.secrets[name])
+    except Exception:
+        return default
+
+
+@st.cache_resource
+def _usage_store():
+    """One shared counter for all visitors (lives as long as the server process)."""
+    import threading
+    return {"lock": threading.Lock(), "day": None, "global": 0, "users": {}}
+
+
+def _today():
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat()
+    except Exception:
+        return datetime.utcnow().date().isoformat()
+
+
+def _visitor_id():
+    """Identify a visitor by IP address when available, else by browser session.
+
+    IP-based counting stops people from resetting their limit by refreshing the page.
+    """
+    try:
+        headers = st.context.headers
+        fwd = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+        if fwd:
+            return "ip:" + fwd.split(",")[0].strip()
+    except Exception:
+        pass
+    if "_visitor_id" not in st.session_state:
+        import uuid
+        st.session_state["_visitor_id"] = "session:" + uuid.uuid4().hex
+    return st.session_state["_visitor_id"]
+
+
+def check_and_count_usage():
+    """Reserve one AI call. Returns (allowed, message_if_blocked)."""
+    store = _usage_store()
+    per_user = _get_limit("PER_USER_DAILY_CALLS", DEFAULT_PER_USER_DAILY_CALLS)
+    global_cap = _get_limit("GLOBAL_DAILY_CALLS", DEFAULT_GLOBAL_DAILY_CALLS)
+    vid = _visitor_id()
+    with store["lock"]:
+        today = _today()
+        if store["day"] != today:
+            store["day"], store["global"], store["users"] = today, 0, {}
+        if store["global"] >= global_cap:
+            return False, LIMIT_REACHED_GLOBAL_MSG
+        used = store["users"].get(vid, 0)
+        if used >= per_user:
+            return False, LIMIT_REACHED_USER_MSG
+        store["users"][vid] = used + 1
+        store["global"] += 1
+    return True, None
+
+
 def claude_api_call(prompt, max_tokens=3000):
     """Central Claude API caller. Returns raw text or None on any failure."""
     api_key = get_anthropic_api_key()
     if not api_key:
+        return None
+    allowed, limit_msg = check_and_count_usage()
+    if not allowed:
+        st.session_state['_last_api_error'] = limit_msg
+        if not st.session_state.get('_limit_warning_shown'):
+            st.warning("⏳ " + limit_msg)
+            st.session_state['_limit_warning_shown'] = True
         return None
     import urllib.request
     try:
