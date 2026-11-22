@@ -8,6 +8,7 @@ from docx.shared import Pt, RGBColor
 import PyPDF2
 import re
 import json
+import hashlib
 from html import escape as _html_escape
 
 
@@ -46,7 +47,8 @@ defaults = {
     'analysis_results': {"matches": [], "missing": [], "score": 0},
     'ai_cv_analysis': {},           # Step 1+2: deep CV+JD analysis from Claude
     'dynamic_questions': [],        # Step 3: personalized questions [{key, question, hint, section, gap_addressed}]
-    'improvement_log': [],          # Step 10: [{type, section, description}]
+    'improvement_log': [],
+    'ai_sections': {},              # AI-rewritten sections, waiting for the user's review          # Step 10: [{type, section, description}]
     'final_cv_data': {},
     'adjusted_cv_data': {},
     'career_recommendations': {},   # Low-match gap analysis / roadmap
@@ -1150,11 +1152,16 @@ Return ONLY valid JSON (no markdown fences, no preamble, no explanation):
   "courses_training": "courses — unchanged",
   "languages": "languages — unchanged",
   "improvement_log": [
-    {{"type": "Improved", "section": "Summary", "description": "Rewrote to target {job_role} explicitly, led with Python/SQL as primary skills"}},
-    {{"type": "Added", "section": "Experience", "description": "Incorporated scope from user answer: tutored 40+ students over 2 semesters"}},
-    {{"type": "Reorganized", "section": "Skills", "description": "Moved Python and SQL to top — both are core requirements in JD"}}
+    {{"type": "Improved", "section": "summary", "description": "Rewrote to target {job_role} explicitly, led with Python/SQL as primary skills", "job_requirement": "3+ years with Python and SQL"}},
+    {{"type": "Added", "section": "experience", "description": "Incorporated scope from user answer: tutored 40+ students over 2 semesters", "job_requirement": "Experience explaining data to non-technical people"}},
+    {{"type": "Reorganized", "section": "skills", "description": "Moved Python and SQL to top — both are core requirements in JD", "job_requirement": "Strong SQL"}}
   ]
-}}"""
+}}
+
+improvement_log rules:
+• "section" must be one of: summary, experience, projects, skills, education, volunteering, courses_training, languages
+• One entry per meaningful change, in plain simple English (the user may not be a native speaker)
+• "job_requirement" quotes or closely paraphrases the job-ad requirement this change serves; use "" if it serves none"""
 
     raw = claude_api_call(prompt, max_tokens=4500)
     return parse_json_response(raw)
@@ -1208,6 +1215,108 @@ def answers_to_text(follow_up_answers):
         elif isinstance(val, str):
             parts.append(val)
     return " ".join(parts)
+
+
+# ── CHANGE REVIEW: see every AI change, why it was made, and keep, undo or edit it ──
+REVIEW_SECTIONS = [
+    ("summary", "Summary"), ("experience", "Experience"), ("projects", "Projects"),
+    ("skills", "Skills"), ("education", "Education"), ("volunteering", "Volunteering"),
+    ("courses_training", "Courses & Training"), ("languages", "Languages"),
+]
+_SECTION_ALIASES = {label.lower(): key for key, label in REVIEW_SECTIONS}
+_SECTION_ALIASES.update({key: key for key, _ in REVIEW_SECTIONS})
+_SECTION_ALIASES.update({"courses": "courses_training", "courses training": "courses_training",
+                         "training": "courses_training", "professional summary": "summary"})
+
+
+def _section_key(name):
+    name = str(name or "").strip().lower()
+    return _SECTION_ALIASES.get(name) or _SECTION_ALIASES.get(name.replace("_", " "))
+
+
+def reset_review_choices():
+    for k in [k for k in st.session_state.keys() if str(k).startswith(("review_use_", "review_text_"))]:
+        del st.session_state[k]
+
+
+def changes_by_section(improvement_log):
+    grouped = {}
+    for item in improvement_log or []:
+        if isinstance(item, dict):
+            key = _section_key(item.get("section"))
+            if key:
+                grouped.setdefault(key, []).append(item)
+    return grouped
+
+
+def apply_review_choices(base_data, ai_sections, choices, edits):
+    """Build the English CV from the user's choices.
+
+    choices[key] is "ai" or "original"; edits[key] is the user's edited text (or None).
+    Sections the user didn't review keep the AI version.
+    """
+    chosen = {}
+    for key, _ in REVIEW_SECTIONS:
+        original = (base_data.get(key) or "").strip()
+        ai_text = (ai_sections.get(key) or "").strip()
+        text = ai_text if (choices.get(key, "ai") == "ai" and ai_text) else original
+        edited = edits.get(key)
+        if isinstance(edited, str) and edited.strip():
+            text = edited.strip()
+        if text:
+            chosen[key] = text
+    return build_final_cv(base_data, chosen, None)
+
+
+def render_change_review(base_data, ai_sections, improvement_log):
+    """Show each changed section: why it changed, before/after, keep or undo, and edit."""
+    changed = [
+        (key, label) for key, label in REVIEW_SECTIONS
+        if (ai_sections.get(key) or "").strip()
+        and (ai_sections.get(key) or "").strip() != (base_data.get(key) or "").strip()
+    ]
+    if not changed:
+        return build_final_cv(base_data, ai_sections, None)
+
+    grouped = changes_by_section(improvement_log)
+    st.markdown("#### ✍️ Review the changes")
+    st.caption("Each change shows why it was made and which job requirement it targets. "
+               "Keep it, go back to your original, or edit the text yourself.")
+
+    choices, edits = {}, {}
+    for key, label in changed:
+        reasons = grouped.get(key, [])
+        use_key, text_key = f"review_use_{key}", f"review_text_{key}"
+        status = "AI version" if st.session_state.get(use_key, "ai") == "ai" else "your original"
+        count = f"{len(reasons)} change{'s' if len(reasons) != 1 else ''}" if reasons else "changed"
+        with st.expander(f"{label} — {count} · using {status}"):
+            for item in reasons:
+                line = f"**{item.get('type', 'Changed')}:** {item.get('description', '')}"
+                req = str(item.get("job_requirement", "") or "").strip()
+                if req:
+                    line += f"  \n🎯 *Job asks for:* {req}"
+                st.markdown(line)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Before (your original)**")
+                st.text(base_data.get(key, "") or "—")
+            with c2:
+                st.markdown("**After (AI)**")
+                st.text(ai_sections.get(key, ""))
+            choice = st.radio(
+                "Which version goes in your CV?", ["ai", "original"],
+                format_func=lambda v: "Keep the AI version" if v == "ai" else "Go back to my original",
+                horizontal=True, key=use_key,
+            )
+            # Refill the edit box whenever the user switches version
+            if st.session_state.get(f"{text_key}_from") != choice:
+                st.session_state[text_key] = ai_sections.get(key, "") if choice == "ai" else base_data.get(key, "")
+                st.session_state[f"{text_key}_from"] = choice
+            st.text_area("Edit the text if you want — this is exactly what goes in your CV:",
+                         key=text_key, height=180)
+            choices[key] = choice
+            edits[key] = st.session_state.get(text_key)
+    return apply_review_choices(base_data, ai_sections, choices, edits)
 
 
 # ── MATCH TIER HELPER ──
@@ -3129,7 +3238,8 @@ elif current_tab == 4:
             st.session_state.final_cv_data = base_data   # original, no rewrite
 
             if lang in ["Hebrew", "Arabic"]:
-                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}"
+                content_id = hashlib.md5(json.dumps(base_data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]
+                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}_{content_id}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
                     with st.spinner(f"🌐 Formatting CV in {'Hebrew' if lang == 'Hebrew' else 'Arabic'}..."):
@@ -3181,12 +3291,19 @@ elif current_tab == 4:
                         base_data, rewrite_result, answers_to_text(st.session_state.follow_up_answers)
                     )
                     st.session_state.fact_check_notes = fact_notes
+                    st.session_state.ai_sections = {
+                        k: v.strip() for k, v in safe_result.items()
+                        if isinstance(v, str) and v.strip() and k != "personal_details"
+                    }
+                    reset_review_choices()
                     st.session_state.adjusted_cv_data = build_final_cv(base_data, safe_result, st.session_state.job_role)
                     st.session_state.cv_adjusted = True
                 else:
                     # Show the original CV unchanged; never add text the user didn't write.
                     st.session_state.adjusted_cv_data = base_data.copy()
                     st.session_state.fact_check_notes = []
+                    st.session_state.ai_sections = {}
+                    reset_review_choices()
                     st.session_state.cv_adjusted = True
                     st.session_state.improvement_log = []
                     if get_anthropic_api_key() is None:
@@ -3198,10 +3315,12 @@ elif current_tab == 4:
                     else:
                         st.warning("⚠️ AI rewrite failed (API error). Showing your original CV.")
 
-            english_cv = st.session_state.adjusted_cv_data or base_data
-
             for note in st.session_state.get("fact_check_notes", []):
                 st.info("🛡️ " + note)
+
+            english_cv = render_change_review(base_data, st.session_state.get("ai_sections", {}),
+                                              st.session_state.improvement_log)
+            st.session_state.adjusted_cv_data = english_cv
 
             # ── Medium match: show missing skills warning ──
             if tier == "medium":
@@ -3227,7 +3346,8 @@ elif current_tab == 4:
 
             # ── Step 9: Localization for Hebrew / Arabic ──
             if lang in ["Hebrew", "Arabic"]:
-                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}"
+                content_id = hashlib.md5(json.dumps(english_cv, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]
+                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}_{content_id}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
                     with st.spinner(f"🌐 Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
@@ -3245,38 +3365,6 @@ elif current_tab == 4:
 
             st.session_state.final_cv_data = final_cv
 
-            # ── Step 10: Improvement Log ──
-            improvement_log = st.session_state.improvement_log
-            if improvement_log:
-                with st.expander(f"📋 What changed in your CV ({len(improvement_log)} improvements)", expanded=False):
-                    type_colors = {
-                        "Added":       ("#dcfce7", "#166534", "✅"),
-                        "Improved":    ("#dbeafe", "#1e40af", "✏️"),
-                        "Reorganized": ("#fef9c3", "#713f12", "🔀"),
-                    }
-                    for item in improvement_log:
-                        itype   = item.get("type", "Improved")
-                        section = item.get("section", "")
-                        desc    = item.get("description", "")
-                        bg, fg, icon = type_colors.get(itype, ("#f1f5f9", "#334155", "•"))
-                        st.markdown(
-                            f'<div style="background:{bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.88rem;color:{fg};">'
-                            f'<strong>{icon} {_esc(itype)}</strong> — <em>{_esc(section)}</em>: {_esc(desc)}</div>',
-                            unsafe_allow_html=True
-                        )
-            elif st.session_state.cv_adjusted:
-                original_summary = base_data.get("summary", "")
-                adjusted_summary = english_cv.get("summary", "")
-                if original_summary and adjusted_summary and original_summary.strip() != adjusted_summary.strip():
-                    with st.expander("👀 Summary — before vs. after"):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown("**Original:**")
-                            st.markdown(f'<div style="background:#fff1f2;padding:12px;border-radius:8px;font-size:0.88rem;color:#334155;">{_esc(original_summary)}</div>', unsafe_allow_html=True)
-                        with c2:
-                            st.markdown("**Rewritten:**")
-                            st.markdown(f'<div style="background:#f0fdf4;padding:12px;border-radius:8px;font-size:0.88rem;color:#166534;">{_esc(adjusted_summary)}</div>', unsafe_allow_html=True)
-
             # ── Regenerate button ──
             col_regen, _ = st.columns([1, 4])
             with col_regen:
@@ -3285,6 +3373,8 @@ elif current_tab == 4:
                     st.session_state.adjusted_cv_data = {}
                     st.session_state.final_cv_data = {}
                     st.session_state.improvement_log = []
+                    st.session_state.ai_sections = {}
+                    reset_review_choices()
                     for k in [k for k in st.session_state.keys() if str(k).startswith("translated_")]:
                         del st.session_state[k]
                     st.rerun()
