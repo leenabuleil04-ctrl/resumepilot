@@ -8,6 +8,12 @@ from docx.shared import Pt, RGBColor
 import PyPDF2
 import re
 import json
+from html import escape as _html_escape
+
+
+def _esc(value):
+    """Escape user or AI text before putting it inside HTML."""
+    return _html_escape(str(value or ""), quote=False)
 from collections import Counter
 
 # --- PAGE CONFIGURATION ---
@@ -892,8 +898,12 @@ def parse_json_response(text):
     return None
 
 
-def build_sections_text(cv_sections, max_per_section=700):
-    """Format CV sections as labeled text blocks for Claude prompts."""
+def build_sections_text(cv_sections):
+    """Format CV sections as labeled text blocks for Claude prompts.
+
+    Sections are sent in full. Cutting them here used to make the rewrite
+    silently drop jobs and projects from long CVs.
+    """
     out = ""
     order = ["personal_details", "summary", "education", "experience",
              "projects", "skills", "volunteering", "courses_training", "languages"]
@@ -901,7 +911,7 @@ def build_sections_text(cv_sections, max_per_section=700):
         val = cv_sections.get(key, "").strip()
         if val:
             label = key.upper().replace("_", " ")
-            out += f"\n[{label}]\n{val[:max_per_section]}\n"
+            out += f"\n[{label}]\n{val}\n"
     return out
 
 
@@ -918,10 +928,10 @@ def call_claude_deep_analysis(cv_sections, job_role, job_desc):
 TARGET ROLE: {job_role}
 
 JOB DESCRIPTION:
-{job_desc[:2000]}
+{job_desc}
 
 CV CONTENT:
-{sections_text[:3000]}
+{sections_text}
 
 Return ONLY a JSON object (no markdown, no explanation):
 {{
@@ -958,7 +968,7 @@ def call_claude_generate_questions(cv_sections, job_role, job_desc, ai_analysis)
     identified in the deep analysis. NOT generic questions.
     Returns list of question dicts or [].
     """
-    sections_text = build_sections_text(cv_sections, max_per_section=400)
+    sections_text = build_sections_text(cv_sections)
     ats_missing    = (ai_analysis or {}).get("ats_keywords_missing", [])[:8]
     weaknesses     = (ai_analysis or {}).get("cv_weaknesses", [])[:5]
     metrics_gaps   = (ai_analysis or {}).get("metrics_missing", [])[:4]
@@ -973,7 +983,7 @@ CV GAPS IDENTIFIED BY ANALYSIS:
 - Bullets needing metrics: {', '.join(metrics_gaps) or 'see CV below'}
 
 CURRENT CV (abbreviated):
-{sections_text[:2500]}
+{sections_text}
 
 QUESTION QUALITY BENCHMARK:
 BAD: "Do you have SQL experience?" — too closed, not personalized
@@ -1083,7 +1093,7 @@ Strong match. Rewrite the CV fully and confidently to target this role. Inject A
 TARGET ROLE: {job_role}
 
 JOB DESCRIPTION:
-{job_desc[:1500]}
+{job_desc}
 
 ANALYSIS RESULTS:
 - ATS keywords to inject naturally (only where genuinely applicable): {', '.join(ats_missing) or 'none'}
@@ -1150,6 +1160,56 @@ Return ONLY valid JSON (no markdown fences, no preamble, no explanation):
     return parse_json_response(raw)
 
 
+# ── FACT CHECK: nothing lost, nothing invented ──
+FACT_CHECK_SECTIONS = ["experience", "education", "projects", "volunteering", "courses_training"]
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _years(text):
+    return set(_YEAR_RE.findall(text or ""))
+
+
+def fact_check_rewrite(original_sections, rewritten_sections, answers_text=""):
+    """Compare the AI rewrite against the original CV, section by section.
+
+    A section is rejected (the original is kept) if the rewrite:
+      - drops a year that was in the original section (a job, degree or project went missing), or
+      - adds a year that is not in the original CV or the user's answers (an invented date).
+    Returns (safe_sections, notes) where notes explain every section that was kept as the original.
+    """
+    safe = dict(rewritten_sections or {})
+    notes = []
+    all_original = " ".join(str(v) for v in (original_sections or {}).values())
+    allowed_years = _years(all_original) | _years(answers_text)
+    for key in FACT_CHECK_SECTIONS:
+        orig = (original_sections or {}).get(key, "") or ""
+        new = safe.get(key)
+        if not orig.strip() or not isinstance(new, str) or not new.strip():
+            continue
+        lost = sorted(_years(orig) - _years(new))
+        invented = sorted(_years(new) - allowed_years)
+        if lost or invented:
+            safe[key] = orig
+            label = key.replace("_", " ").title()
+            reason = []
+            if lost:
+                reason.append("dropped " + ", ".join(lost))
+            if invented:
+                reason.append("added dates not in your CV (" + ", ".join(invented) + ")")
+            notes.append(f"{label}: kept your original text because the AI rewrite " + " and ".join(reason) + ".")
+    return safe, notes
+
+
+def answers_to_text(follow_up_answers):
+    parts = []
+    for val in (follow_up_answers or {}).values():
+        if isinstance(val, dict):
+            parts.append(str(val.get("answer", "")))
+        elif isinstance(val, str):
+            parts.append(val)
+    return " ".join(parts)
+
+
 # ── MATCH TIER HELPER ──
 def get_match_tier(score):
     """Classify a match score into high / medium / low tier."""
@@ -1177,10 +1237,10 @@ def call_claude_career_recommendations(cv_sections, job_role, job_desc, ai_analy
 TARGET ROLE: {job_role}
 
 JOB DESCRIPTION:
-{job_desc[:1500]}
+{job_desc}
 
 CANDIDATE'S CURRENT CV:
-{sections_text[:2500]}
+{sections_text}
 
 IDENTIFIED GAPS:
 - Missing skills: {', '.join(missing_skills) or 'see analysis'}
@@ -1226,11 +1286,11 @@ Be specific and reference the actual CV content and job requirements. No generic
 
 
 # ── STEP 9: Professional Multilingual Localization via Claude ──
-def call_claude_localize_cv(cv_data, target_lang):
+def call_claude_localize_cv(cv_data, target_lang, hebrew_form="neutral"):
     """
     Step 9: Localize the CV to Hebrew or Arabic using Claude.
     Native-level professional phrasing — not word-by-word translation.
-    Falls back to googletrans if Claude unavailable.
+    Returns None if Claude is unavailable (no third-party fallback: CVs hold personal data).
     """
     lang_style = {
         "Hebrew": (
@@ -1256,6 +1316,10 @@ def call_claude_localize_cv(cv_data, target_lang):
         return cv_data
 
     sections_json = json.dumps(sections_to_translate, ensure_ascii=False)
+    hebrew_form_rule = {
+        "feminine": "write about the candidate in feminine forms (e.g. פיתחה, ניהלה, אחראית)",
+        "masculine": "write about the candidate in masculine forms (e.g. פיתח, ניהל, אחראי)",
+    }.get(hebrew_form, "avoid gendered verb forms; use nouns and neutral phrasing (e.g. פיתוח מערכת, ניהול צוות)")
 
     prompt = f"""Translate and localize this CV content to {lang_style[target_lang]}.
 
@@ -1264,7 +1328,7 @@ MANDATORY RULES:
 - Keep ALL institution and company names in their original language
 - Keep ALL dates EXACTLY as written (2022–2025, Present, etc.)
 - Keep ALL numbers, percentages, and GPA values exactly
-- For Hebrew: use masculine formal forms as default
+- For Hebrew: {hebrew_form_rule}
 - Do NOT translate proper nouns (universities, companies, cities, person names)
 
 CV SECTIONS TO LOCALIZE (JSON):
@@ -1282,8 +1346,7 @@ Return the same JSON keys with localized text. Return ONLY the JSON object — n
                 final[key] = val
         return final
 
-    # Fallback to googletrans if Claude unavailable or failed
-    return translate_cv_googletrans(cv_data, target_lang)
+    return None
 
 GENERIC_IGNORE_WORDS = NOISE_WORDS  # alias for backward compat
 
@@ -1485,7 +1548,7 @@ def render_entry(block, show_subtitle=True):
     lines = [l.strip() for l in block.split('\n') if l.strip()]
     if not lines: return ""
     title = lines[0].lstrip('•-* ')
-    html_out = f'<div class="cv-entry"><div class="cv-entry-title">{title}</div>'
+    html_out = f'<div class="cv-entry"><div class="cv-entry-title">{_esc(title)}</div>'
     subtitle_done = False
     bullets = []
     for line in lines[1:]:
@@ -1495,136 +1558,14 @@ def render_entry(block, show_subtitle=True):
         if is_bullet:
             bullets.append(clean)
         elif not subtitle_done and show_subtitle:
-            html_out += f'<div class="cv-entry-sub">{clean}</div>'
+            html_out += f'<div class="cv-entry-sub">{_esc(clean)}</div>'
             subtitle_done = True
         else:
             bullets.append(clean)
     if bullets:
-        html_out += '<ul class="cv-bullets">' + ''.join(f'<li>{b}</li>' for b in bullets) + '</ul>'
+        html_out += '<ul class="cv-bullets">' + ''.join(f'<li>{_esc(b)}</li>' for b in bullets) + '</ul>'
     html_out += '</div>'
     return html_out
-
-
-def translate_cv_googletrans(cv_data, target_lang):
-    """
-    Translates CV sections using deep-translator.
-    Uses word-boundary-safe placeholders to avoid bugs like comMUNication.
-    """
-    try:
-        from deep_translator import GoogleTranslator
-    except ImportError:
-        return cv_data
-
-    lang_code = "iw" if target_lang == "Hebrew" else "ar"
-
-    # Ordered longest-first to avoid partial matches
-    PRESERVE = [
-        "Hebrew University of Jerusalem",
-        "Red Sea Candles",
-        "Rosary Sisters High School",
-        "Nayzak Program",
-        "HUBS Aid Program",
-        "Model United Nations",
-        "scikit-learn", "RStudio", "BigQuery", "NetworkX",
-        "NumPy", "matplotlib", "scipy", "pandas",
-        "TensorFlow", "PyTorch", "GitHub", "GitLab",
-        "Streamlit", "Jupyter", "Mechina", "Tawjihi", "IGCSE",
-        "Python", "Unix", "Bash", "Linux", "Docker",
-        "Excel", "Tableau", "Azure", "HUJI", "HUBS",
-        "Git", "AWS", "GPA", "MVP", "CLI",
-        "Facebook", "LinkedIn",
-    ]
-
-    def protect_and_translate(text):
-        if not text or not text.strip():
-            return text
-
-        placeholders = {}
-        protected = text
-        counter = 0
-
-        # Step 1: protect multi-word phrases and tools using word boundaries
-        for word in PRESERVE:
-            # Use word boundary only for short single words, not phrases
-            if ' ' in word:
-                pattern = re.escape(word)
-            else:
-                pattern = r'\b' + re.escape(word) + r'\b'
-            ph = f"KEEP{counter}KEEP"
-            new_protected = re.sub(pattern, ph, protected, flags=re.IGNORECASE)
-            if new_protected != protected:
-                placeholders[ph] = word
-                protected = new_protected
-                counter += 1
-
-        # Step 2: protect dates like "2025–Present", "2025-2026", "2025"
-        for m in re.finditer(r'\d{4}[–\-](?:Present|\d{4})|\b\d{4}\b', protected):
-            ph = f"DATE{counter}DATE"
-            placeholders[ph] = m.group()
-            protected = protected[:m.start()] + ph + protected[m.end():]
-            counter += 1
-            # Restart after modification to avoid index issues
-            break
-        # Simpler date protection — replace all at once
-        def replace_date(m):
-            nonlocal counter
-            ph = f"DATE{counter}DATE"
-            placeholders[ph] = m.group()
-            counter += 1
-            return ph
-        protected = re.sub(r'\d{4}[–\-](?:Present|\d{4})|\b\d{4}\b', replace_date, protected)
-
-        # Step 3: protect score numbers like "90.4", "96"
-        protected = re.sub(r'\b\d+\.\d+\b|\b\d{2,3}\b',
-                           lambda m: (placeholders.__setitem__(f"NUM{counter}NUM", m.group()) or f"NUM{counter}NUM"),
-                           protected)
-
-        # Step 4: translate line by line
-        lines = protected.split('\n')
-        translated_lines = []
-        translator = GoogleTranslator(source='auto', target=lang_code)
-
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                translated_lines.append('')
-                continue
-            # Skip if line has no real content after removing placeholders
-            content_only = re.sub(r'\w+\d+\w+', '', stripped).strip('•-* \t|·–—:,.')
-            if not content_only:
-                translated_lines.append(line)
-                continue
-            try:
-                if len(stripped) > 4500:
-                    translated_lines.append(line)
-                    continue
-                t = translator.translate(stripped)
-                translated_lines.append(t if t and t.strip() else line)
-            except Exception:
-                translated_lines.append(line)
-
-        result = '\n'.join(translated_lines)
-
-        # Step 5: restore all placeholders
-        for ph, original in placeholders.items():
-            result = result.replace(ph, original)
-
-        return result
-
-    result = cv_data.copy()
-    for key in ["summary", "education", "experience", "projects",
-                "courses_training", "volunteering", "languages", "skills"]:
-        val = cv_data.get(key, "").strip()
-        if not val:
-            continue
-        try:
-            translated = protect_and_translate(val)
-            if translated and translated.strip():
-                result[key] = translated
-        except Exception:
-            pass
-
-    return result
 
 
 def extract_name_and_contact(personal_details_text):
@@ -1775,7 +1716,7 @@ def render_cv_html(cv_data, lang="English"):
     """
 
     def sec(title):
-        return f'<div class="isr-section-title">{title}</div>'
+        return f'<div class="isr-section-title">{_esc(title)}</div>'
 
     def parse_date_from_title(title):
         """Extract trailing date from title like 'Company Name | 2025–Present'"""
@@ -1798,9 +1739,9 @@ def render_cv_html(cv_data, lang="English"):
 
             out += '<div class="isr-entry">'
             out += '<div class="isr-entry-header">'
-            out += f'<span class="isr-entry-title">{title}</span>'
+            out += f'<span class="isr-entry-title">{_esc(title)}</span>'
             if date:
-                out += f'<span class="isr-entry-date">{date}</span>'
+                out += f'<span class="isr-entry-date">{_esc(date)}</span>'
             out += '</div>'
 
             subtitle_done = False
@@ -1812,13 +1753,13 @@ def render_cv_html(cv_data, lang="English"):
                 if is_bullet:
                     bullets.append(clean)
                 elif not subtitle_done:
-                    out += f'<div class="isr-entry-sub">{clean}</div>'
+                    out += f'<div class="isr-entry-sub">{_esc(clean)}</div>'
                     subtitle_done = True
                 else:
                     bullets.append(clean)
 
             if bullets:
-                out += '<ul class="isr-bullets">' + ''.join(f'<li>{b}</li>' for b in bullets) + '</ul>'
+                out += '<ul class="isr-bullets">' + ''.join(f'<li>{_esc(b)}</li>' for b in bullets) + '</ul>'
             out += '</div>'
         return out
 
@@ -1826,16 +1767,16 @@ def render_cv_html(cv_data, lang="English"):
     html = f'{cv_css}<div class="isr-cv" {dir_attr}>'
 
     # Header
-    html += f'<div class="isr-name">{name}</div>'
+    html += f'<div class="isr-name">{_esc(name)}</div>'
     if contact:
-        html += f'<div class="isr-contact">{contact}</div>'
+        html += f'<div class="isr-contact">{_esc(contact)}</div>'
     html += '<hr class="isr-divider">'
 
     # 1. SUMMARY
     if cv_data.get("summary"):
         html += sec(h[1])
         summary = cv_data["summary"].replace('\n', ' ').strip()
-        html += f'<div style="font-size:10.5pt;color:#1e293b;line-height:1.5;margin-bottom:8px;">{summary}</div>'
+        html += f'<div style="font-size:10.5pt;color:#1e293b;line-height:1.5;margin-bottom:8px;">{_esc(summary)}</div>'
 
     # 2. EDUCATION
     if cv_data.get("education"):
@@ -1850,13 +1791,13 @@ def render_cv_html(cv_data, lang="English"):
             title, date = parse_date_from_title(raw_title)
             html += '<div class="isr-entry">'
             html += '<div class="isr-entry-header">'
-            html += f'<span class="isr-entry-title">{title}</span>'
-            if date: html += f'<span class="isr-entry-date">{date}</span>'
+            html += f'<span class="isr-entry-title">{_esc(title)}</span>'
+            if date: html += f'<span class="isr-entry-date">{_esc(date)}</span>'
             html += '</div>'
             for l in lines[1:]:
                 clean = l.lstrip('•-* ').strip()
                 if clean:
-                    html += f'<div class="isr-entry-sub">{clean}</div>'
+                    html += f'<div class="isr-entry-sub">{_esc(clean)}</div>'
             html += '</div>'
 
     # 3. EXPERIENCE
@@ -1884,10 +1825,10 @@ def render_cv_html(cv_data, lang="English"):
 
         if skills_data["TECHNICAL"]:
             tech_label = ("תכנות וכלים" if lang == "Hebrew" else "البرمجة والأدوات" if lang == "Arabic" else "Technical")
-            html += f'<div class="isr-skills-row"><span class="isr-skills-label">{tech_label}:</span> {" · ".join(skills_data["TECHNICAL"])}</div>'
+            html += f'<div class="isr-skills-row"><span class="isr-skills-label">{tech_label}:</span> {" · ".join(_esc(x) for x in skills_data["TECHNICAL"])}</div>'
         if skills_data["PROFESSIONAL"]:
             prof_label = ("כישורים מקצועיים" if lang == "Hebrew" else "المهارات المهنية" if lang == "Arabic" else "Professional")
-            html += f'<div class="isr-skills-row"><span class="isr-skills-label">{prof_label}:</span> {" · ".join(skills_data["PROFESSIONAL"])}</div>'
+            html += f'<div class="isr-skills-row"><span class="isr-skills-label">{prof_label}:</span> {" · ".join(_esc(x) for x in skills_data["PROFESSIONAL"])}</div>'
 
     # 6. VOLUNTEERING / AWARDS / LEADERSHIP
     if cv_data.get("volunteering"):
@@ -1899,7 +1840,7 @@ def render_cv_html(cv_data, lang="English"):
     if cv_data.get("languages"):
         html += sec(h[7])
         langs = re.sub(r'\s*•\s*', ' · ', cv_data["languages"]).strip(' ·')
-        html += f'<div style="font-size:10pt;color:#1e293b;">{langs}</div>'
+        html += f'<div style="font-size:10pt;color:#1e293b;">{_esc(langs)}</div>'
 
     # 8. COURSES (if exists)
     if cv_data.get("courses_training"):
@@ -2344,7 +2285,7 @@ def render_step_bar(current):
             dot_cls, name_cls, icon = "rp-dot-active", "rp-name-active", str(i+1)
         else:
             dot_cls, name_cls, icon = "rp-dot-todo", "rp-name-todo", str(i+1)
-        html += f'<div class="rp-step-item"><div class="rp-step-dot {dot_cls}">{icon}</div><span class="rp-step-name {name_cls}">{name}</span></div>'
+        html += f'<div class="rp-step-item"><div class="rp-step-dot {dot_cls}">{icon}</div><span class="rp-step-name {name_cls}">{_esc(name)}</span></div>'
         if i < len(TAB_NAMES) - 1:
             conn = "rp-conn-done" if i < current else "rp-conn-todo"
             html += f'<div class="rp-connector {conn}"></div>'
@@ -2581,8 +2522,7 @@ elif current_tab == 1:
                 # Detect if uploaded CV is in Hebrew or Arabic
                 detected_lang = detect_language(text)
                 if detected_lang in ["Hebrew", "Arabic"]:
-                    st.warning(f"⚠️ Your uploaded CV appears to be in **{detected_lang}**. For best results, please upload an English version of your CV. The app needs English text for accurate analysis and job matching.")
-                    st.markdown("**You can still continue**, but the analysis accuracy may be lower.")
+                    st.info(f"🌐 Your CV is in **{detected_lang}** — that's fine. We'll read it as is. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
 
                 st.session_state.cv_full_text = text
                 st.session_state.manual_cv_data = classify_sections_refined(text)
@@ -2610,7 +2550,7 @@ elif current_tab == 1:
         if pasted.strip():
             detected_lang = detect_language(pasted)
             if detected_lang in ["Hebrew", "Arabic"]:
-                st.warning(f"⚠️ This text appears to be in **{detected_lang}**. Please paste your CV in English for best results.")
+                st.info(f"🌐 Your CV is in **{detected_lang}** — that's fine. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
 
         if st.button("🔍 Auto-Structure Text", type="primary"):
             if pasted.strip():
@@ -2785,7 +2725,7 @@ elif current_tab == 2:
                     ✅ CV Strengths</div>""", unsafe_allow_html=True)
                 if strengths:
                     for s in strengths:
-                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#166534;">✓ {s}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#166534;">✓ {_esc(s)}</div>', unsafe_allow_html=True)
                 else:
                     st.markdown('<div style="color:#6b7280;font-size:0.85rem;">No clear strengths identified for this role.</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -2797,7 +2737,7 @@ elif current_tab == 2:
                     ⚠️ Gaps to Address</div>""", unsafe_allow_html=True)
                 if weaknesses:
                     for w in weaknesses:
-                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#9f1239;">✗ {w}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#9f1239;">✗ {_esc(w)}</div>', unsafe_allow_html=True)
                 else:
                     st.markdown('<div style="color:#16a34a;font-size:0.85rem;font-weight:600;">🎉 No major gaps!</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -2816,7 +2756,7 @@ elif current_tab == 2:
                     st.markdown('<div style="background:#f0fdf4;border-radius:10px;padding:1rem;border:1px solid #bbf7d0;">', unsafe_allow_html=True)
                     st.markdown('<div style="font-weight:700;color:#16a34a;font-size:0.9rem;margin-bottom:0.5rem;">✅ Keywords Present</div>', unsafe_allow_html=True)
                     chips = " ".join(
-                        f'<span style="display:inline-block;background:#dcfce7;color:#166534;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{k}</span>'
+                        f'<span style="display:inline-block;background:#dcfce7;color:#166534;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
                         for k in ats_present[:12]
                     )
                     st.markdown(chips, unsafe_allow_html=True)
@@ -2827,7 +2767,7 @@ elif current_tab == 2:
                     st.markdown('<div style="background:#fff1f2;border-radius:10px;padding:1rem;border:1px solid #fecdd3;">', unsafe_allow_html=True)
                     st.markdown('<div style="font-weight:700;color:#be123c;font-size:0.9rem;margin-bottom:0.5rem;">❌ Keywords Missing</div>', unsafe_allow_html=True)
                     chips = " ".join(
-                        f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{k}</span>'
+                        f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
                         for k in ats_missing[:12]
                     )
                     st.markdown(chips, unsafe_allow_html=True)
@@ -2838,7 +2778,7 @@ elif current_tab == 2:
                 st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
                 st.markdown("**📊 Bullets That Need Metrics (add numbers = more impact)**")
                 for m in metrics_miss:
-                    st.markdown(f'<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#78350f;">{m}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#78350f;">{_esc(m)}</div>', unsafe_allow_html=True)
 
             # ── Quick Wins ──
             quick_wins = ai.get("quick_wins", [])
@@ -2846,7 +2786,7 @@ elif current_tab == 2:
                 st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
                 st.markdown("**⚡ Quick Wins — biggest impact improvements**")
                 for i, qw in enumerate(quick_wins, 1):
-                    st.markdown(f'<div style="background:#f0f9ff;border-left:3px solid #0ea5e9;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#0c4a6e;">{i}. {qw}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="background:#f0f9ff;border-left:3px solid #0ea5e9;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#0c4a6e;">{i}. {_esc(qw)}</div>', unsafe_allow_html=True)
 
             st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
             nav_buttons(2, can_proceed=True, proceed_label="Next: Refine CV →")
@@ -2891,7 +2831,7 @@ elif current_tab == 3:
             if ats_missing:
                 chips = " ".join(
                     f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
-                    f'border-radius:9999px;font-size:0.8rem;margin:2px;">{k}</span>'
+                    f'border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
                     for k in ats_missing[:10]
                 )
                 st.markdown(f'<div style="margin-bottom:12px;"><strong style="font-size:0.85rem;color:#64748b;">Skills gap at a glance:</strong><br>{chips}</div>', unsafe_allow_html=True)
@@ -2955,11 +2895,11 @@ elif current_tab == 3:
             gap    = q.get("gap_addressed", "")
 
             # Show section badge if available
-            badge = f'<span style="font-size:0.72rem;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:9999px;font-weight:600;margin-left:6px;text-transform:uppercase;">{section}</span>' if section else ""
-            text_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+            badge = f'<span style="font-size:0.72rem;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:9999px;font-weight:600;margin-left:6px;text-transform:uppercase;">{_esc(section)}</span>' if section else ""
+            text_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', _esc(text))
             st.markdown(f'<div style="font-weight:700;font-size:0.95rem;color:#1e293b;margin-bottom:4px;">{text_html}{badge}</div>', unsafe_allow_html=True)
             if gap:
-                st.markdown(f'<div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">Why we ask: {gap}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">Why we ask: {_esc(gap)}</div>', unsafe_allow_html=True)
 
             # Retrieve prior answer (supports both old string format and new dict format)
             prior = st.session_state.follow_up_answers.get(key, "")
@@ -3005,6 +2945,15 @@ elif current_tab == 4:
     st.markdown('<div class="rp-page-sub">Your professionally rewritten, ATS-optimized resume. Review before downloading.</div>', unsafe_allow_html=True)
 
     lang = st.radio("Output language:", ["English","Hebrew","Arabic"], horizontal=True, key="lang_select")
+    if lang == "Hebrew":
+        form_labels = {"neutral": "Neutral wording", "feminine": "Feminine (פיתחה)", "masculine": "Masculine (פיתח)"}
+        st.radio(
+            "How should your Hebrew CV refer to you?",
+            list(form_labels.keys()),
+            format_func=lambda k: form_labels[k],
+            horizontal=True,
+            key="hebrew_form",
+        )
     if lang != st.session_state.active_lang:
         st.session_state.active_lang = lang
         st.markdown(
@@ -3085,7 +3034,7 @@ elif current_tab == 4:
                         st.markdown("**🔴 Critical missing skills**")
                         for s in critical:
                             st.markdown(f'<div style="background:#fee2e2;border-radius:6px;padding:6px 12px;'
-                                        f'margin-bottom:4px;font-size:0.87rem;color:#991b1b;">✗ {s}</div>',
+                                        f'margin-bottom:4px;font-size:0.87rem;color:#991b1b;">✗ {_esc(s)}</div>',
                                         unsafe_allow_html=True)
 
                 with col_nice:
@@ -3094,7 +3043,7 @@ elif current_tab == 4:
                         st.markdown("**🟡 Nice-to-have gaps**")
                         for s in nice:
                             st.markdown(f'<div style="background:#fef9c3;border-radius:6px;padding:6px 12px;'
-                                        f'margin-bottom:4px;font-size:0.87rem;color:#713f12;">◎ {s}</div>',
+                                        f'margin-bottom:4px;font-size:0.87rem;color:#713f12;">◎ {_esc(s)}</div>',
                                         unsafe_allow_html=True)
 
                 st.markdown("<div style='margin-bottom:1.2rem;'></div>", unsafe_allow_html=True)
@@ -3156,7 +3105,7 @@ elif current_tab == 4:
                     if better_roles:
                         roles_html = "".join(
                             f'<div style="background:#eff6ff;color:#1d4ed8;padding:4px 12px;'
-                            f'border-radius:9999px;font-size:0.82rem;margin-bottom:4px;display:inline-block;margin-right:4px;">{r}</div>'
+                            f'border-radius:9999px;font-size:0.82rem;margin-bottom:4px;display:inline-block;margin-right:4px;">{_esc(r)}</div>'
                             for r in better_roles
                         )
                         st.markdown(f"""
@@ -3180,13 +3129,17 @@ elif current_tab == 4:
             st.session_state.final_cv_data = base_data   # original, no rewrite
 
             if lang in ["Hebrew", "Arabic"]:
-                cache_key = f"translated_{lang}"
+                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
                     with st.spinner(f"🌐 Formatting CV in {'Hebrew' if lang == 'Hebrew' else 'Arabic'}..."):
-                        localized = call_claude_localize_cv(base_data, lang)
-                    st.session_state[cache_key] = localized
-                    display_cv = localized
+                        localized = call_claude_localize_cv(base_data, lang, st.session_state.get("hebrew_form", "neutral"))
+                    if localized:
+                        st.session_state[cache_key] = localized
+                        display_cv = localized
+                    else:
+                        st.warning(f"⚠️ Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
+                        display_cv = base_data
                 else:
                     display_cv = cached
             else:
@@ -3224,17 +3177,16 @@ elif current_tab == 4:
                 if rewrite_result:
                     improvement_log = rewrite_result.pop("improvement_log", [])
                     st.session_state.improvement_log = improvement_log if isinstance(improvement_log, list) else []
-                    st.session_state.adjusted_cv_data = build_final_cv(base_data, rewrite_result, st.session_state.job_role)
+                    safe_result, fact_notes = fact_check_rewrite(
+                        base_data, rewrite_result, answers_to_text(st.session_state.follow_up_answers)
+                    )
+                    st.session_state.fact_check_notes = fact_notes
+                    st.session_state.adjusted_cv_data = build_final_cv(base_data, safe_result, st.session_state.job_role)
                     st.session_state.cv_adjusted = True
                 else:
-                    fallback = base_data.copy()
-                    if st.session_state.job_role and fallback.get("summary"):
-                        if st.session_state.job_role.lower() not in fallback["summary"].lower():
-                            fallback["summary"] = (
-                                f"Motivated professional targeting a {st.session_state.job_role} role. "
-                                + fallback["summary"]
-                            )
-                    st.session_state.adjusted_cv_data = fallback
+                    # Show the original CV unchanged; never add text the user didn't write.
+                    st.session_state.adjusted_cv_data = base_data.copy()
+                    st.session_state.fact_check_notes = []
                     st.session_state.cv_adjusted = True
                     st.session_state.improvement_log = []
                     if get_anthropic_api_key() is None:
@@ -3248,13 +3200,16 @@ elif current_tab == 4:
 
             english_cv = st.session_state.adjusted_cv_data or base_data
 
+            for note in st.session_state.get("fact_check_notes", []):
+                st.info("🛡️ " + note)
+
             # ── Medium match: show missing skills warning ──
             if tier == "medium":
                 missing_skills = st.session_state.ai_cv_analysis.get("ats_keywords_missing", [])
                 if missing_skills:
                     chips = " ".join(
                         f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
-                        f'border-radius:9999px;font-size:0.78rem;margin:2px;">{k}</span>'
+                        f'border-radius:9999px;font-size:0.78rem;margin:2px;">{_esc(k)}</span>'
                         for k in missing_skills[:10]
                     )
                     st.markdown(f"""
@@ -3272,13 +3227,17 @@ elif current_tab == 4:
 
             # ── Step 9: Localization for Hebrew / Arabic ──
             if lang in ["Hebrew", "Arabic"]:
-                cache_key = f"translated_{lang}"
+                cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
                     with st.spinner(f"🌐 Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
-                        localized = call_claude_localize_cv(english_cv, lang)
-                    st.session_state[cache_key] = localized
-                    final_cv = localized
+                        localized = call_claude_localize_cv(english_cv, lang, st.session_state.get("hebrew_form", "neutral"))
+                    if localized:
+                        st.session_state[cache_key] = localized
+                        final_cv = localized
+                    else:
+                        st.warning(f"⚠️ Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
+                        final_cv = english_cv
                 else:
                     final_cv = cached
             else:
@@ -3302,7 +3261,7 @@ elif current_tab == 4:
                         bg, fg, icon = type_colors.get(itype, ("#f1f5f9", "#334155", "•"))
                         st.markdown(
                             f'<div style="background:{bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.88rem;color:{fg};">'
-                            f'<strong>{icon} {itype}</strong> — <em>{section}</em>: {desc}</div>',
+                            f'<strong>{icon} {_esc(itype)}</strong> — <em>{_esc(section)}</em>: {_esc(desc)}</div>',
                             unsafe_allow_html=True
                         )
             elif st.session_state.cv_adjusted:
@@ -3313,10 +3272,10 @@ elif current_tab == 4:
                         c1, c2 = st.columns(2)
                         with c1:
                             st.markdown("**Original:**")
-                            st.markdown(f'<div style="background:#fff1f2;padding:12px;border-radius:8px;font-size:0.88rem;color:#334155;">{original_summary}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div style="background:#fff1f2;padding:12px;border-radius:8px;font-size:0.88rem;color:#334155;">{_esc(original_summary)}</div>', unsafe_allow_html=True)
                         with c2:
                             st.markdown("**Rewritten:**")
-                            st.markdown(f'<div style="background:#f0fdf4;padding:12px;border-radius:8px;font-size:0.88rem;color:#166534;">{adjusted_summary}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div style="background:#f0fdf4;padding:12px;border-radius:8px;font-size:0.88rem;color:#166534;">{_esc(adjusted_summary)}</div>', unsafe_allow_html=True)
 
             # ── Regenerate button ──
             col_regen, _ = st.columns([1, 4])
@@ -3326,9 +3285,8 @@ elif current_tab == 4:
                     st.session_state.adjusted_cv_data = {}
                     st.session_state.final_cv_data = {}
                     st.session_state.improvement_log = []
-                    for k in ["translated_Hebrew", "translated_Arabic"]:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                    for k in [k for k in st.session_state.keys() if str(k).startswith("translated_")]:
+                        del st.session_state[k]
                     st.rerun()
 
             st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
@@ -3375,7 +3333,7 @@ elif current_tab == 5:
         # Score badge + tier-specific message
         if score:
             score_class = "alert-green" if tier == "high" else "alert-orange" if tier == "medium" else "alert-red"
-            st.markdown(f'<div class="alert-box {score_class}">Match Score: {score}% for {st.session_state.job_role}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="alert-box {score_class}">Match Score: {score}% for {_esc(st.session_state.job_role)}</div>', unsafe_allow_html=True)
 
         if tier == "low":
             st.markdown("""
