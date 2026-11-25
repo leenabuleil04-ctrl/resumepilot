@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResumePilot — Tailor your CV to the job. See every change.</title>
+<meta name="description" content="ResumePilot rewrites your CV for a specific job, explains every change, and never invents experience. English, Hebrew and Arabic.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F6F8FB;      /* cool page white */
+  --sheet:#FFFFFF;      /* the CV document */
+  --ink:#16213A;        /* navy ink */
+  --muted:#5A6478;
+  --rule:#DCE2EC;
+  --strike:#D6354A;     /* deleted text */
+  --insert:#0B7A5C;     /* added text */
+  --mark:#FFE45C;       /* highlighter: job requirement */
+  --action:#2A3FD6;     /* buttons, links */
+  --display:"Bricolage Grotesque", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", system-ui, sans-serif;
+  --app:"https://resumepilot-app.streamlit.app";
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 18px/1.6 var(--body);-webkit-font-smoothing:antialiased}
+a{color:var(--action)}
+:focus-visible{outline:3px solid var(--action);outline-offset:3px;border-radius:4px}
+.wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+.btn{display:inline-block;font:700 17px/1 var(--body);text-decoration:none;padding:16px 24px;border-radius:12px;border:2px solid var(--ink);transition:transform .15s ease}
+.btn:hover{transform:translateY(-2px)}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-ghost{background:transparent;color:var(--ink)}
+
+/* header */
+.top{display:flex;align-items:center;justify-content:space-between;padding-block:22px}
+.logo{display:flex;align-items:center;gap:10px;font:800 22px/1 var(--display);color:var(--ink);text-decoration:none;letter-spacing:-.01em}
+.logo-mark{width:30px;height:36px;background:var(--sheet);border:2px solid var(--ink);border-radius:4px;position:relative}
+.logo-mark::before{content:"";position:absolute;left:5px;right:5px;top:9px;height:3px;background:var(--strike)}
+.logo-mark::after{content:"";position:absolute;left:5px;right:9px;top:18px;height:7px;background:var(--mark)}
+.top nav{display:flex;gap:28px;align-items:center}
+.top nav a{color:var(--ink);text-decoration:none;font-weight:700;font-size:16px}
+.top nav a.btn{padding:12px 18px;font-size:15px;color:#fff}
+@media (max-width:760px){.top nav a:not(.btn){display:none}}
+@media (max-width:420px){.top nav a.btn{padding:10px 12px;font-size:14px}}
+
+/* hero */
+.hero{display:grid;grid-template-columns:1fr 1.05fr;gap:56px;align-items:center;padding-block:48px 88px}
+.hero h1{font:800 clamp(44px,6vw,76px)/.98 var(--display);letter-spacing:-.035em;margin:0 0 24px}
+.hero p.lede{font-size:21px;color:var(--muted);max-width:30em;margin:0 0 32px}
+.hero .ctas{display:flex;gap:14px;flex-wrap:wrap}
+.hero small{display:block;margin-top:18px;color:var(--muted);font-size:15px}
+@media (max-width:920px){.hero{grid-template-columns:1fr;gap:40px;padding-block-start:24px}}
+
+/* the marked-up CV */
+.doc-stage{position:relative;padding:0 150px 0 0}
+.doc{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:30px 32px;box-shadow:0 30px 60px -30px rgba(22,33,58,.35);position:relative}
+.doc .name{font:700 22px/1.2 var(--display);margin:0}
+.doc .contact{color:var(--muted);font-size:13px;margin:4px 0 18px}
+.doc h4{font:700 12px/1 var(--body);color:var(--muted);letter-spacing:.04em;margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+.doc .role{font-weight:700;font-size:15px;margin:0}
+.doc .meta{color:var(--muted);font-size:13px;margin:0 0 6px}
+.doc ul{margin:0;padding-left:18px;font-size:14.5px;line-height:1.55}
+.doc li{margin:4px 0}
+.del{color:var(--strike);text-decoration:line-through;text-decoration-thickness:2px}
+.ins{color:var(--insert);font-weight:700}
+.hl{background:linear-gradient(transparent 55%,var(--mark) 55%);padding:0 1px}
+.note{position:absolute;right:0;width:136px;font-size:13px;line-height:1.35;color:var(--ink);padding-left:12px;border-left:3px solid var(--mark)}
+.note b{display:block;font-size:12px;color:var(--muted);font-weight:700}
+.note::before{content:"";position:absolute;left:-26px;top:10px;width:20px;border-top:2px solid var(--mark)}
+.note-1{top:118px}.note-2{top:214px}.note-3{top:304px}
+@media (max-width:560px){
+  .doc-stage{padding:0}
+  .note{position:static;width:auto;margin:12px 0 0;border-left:3px solid var(--mark)}
+  .note::before{display:none}
+}
+
+/* one orchestrated load sequence: edits appear in order */
+@media (prefers-reduced-motion:no-preference){
+  .seq{opacity:0;animation:appear .5s ease forwards}
+  .del.seq{opacity:1;text-decoration-color:transparent;animation:strike .45s ease forwards}
+  .s1{animation-delay:.6s}.s2{animation-delay:1s}.s3{animation-delay:1.5s}
+  .s4{animation-delay:1.9s}.s5{animation-delay:2.4s}.s6{animation-delay:2.8s}
+  .s7{animation-delay:3.2s}.s8{animation-delay:3.6s}
+  @keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  @keyframes strike{to{text-decoration-color:var(--strike)}}
+}
+
+/* sections */
+section{padding:96px 0;border-top:1px solid var(--rule)}
+.sec-head{max-width:640px;margin-bottom:48px}
+.sec-head h2{font:800 clamp(32px,4vw,48px)/1.05 var(--display);letter-spacing:-.025em;margin:0 0 14px}
+.sec-head p{color:var(--muted);margin:0;font-size:19px}
+
+/* steps: a real sequence, so numbered */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;counter-reset:s;list-style:none;padding:0;margin:0}
+.steps li{counter-increment:s;padding-top:20px;border-top:3px solid var(--ink)}
+.steps li::before{content:counter(s);font:800 40px/1 var(--display);display:block;margin-bottom:14px}
+.steps h3{font:700 21px/1.2 var(--display);margin:0 0 8px}
+.steps p{margin:0;color:var(--muted);font-size:17px}
+@media (max-width:860px){.steps{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.steps{grid-template-columns:1fr}}
+
+/* review demo */
+.review{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start}
+.review-card{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:24px}
+.review-card .why{font-size:16px;margin:0 0 6px}
+.review-card .req{font-size:15px;margin:0 0 18px;color:var(--muted)}
+.review-card .req span{background:var(--mark);color:var(--ink);padding:1px 4px;border-radius:3px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.compare div{font-size:15px;line-height:1.5;padding:12px;border-radius:8px;border:1px solid var(--rule)}
+.compare b{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.toggle{display:inline-flex;border:2px solid var(--ink);border-radius:10px;overflow:hidden}
+.toggle button{font:700 15px var(--body);border:0;padding:10px 14px;background:var(--sheet);color:var(--ink);cursor:pointer}
+.toggle button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.review-out{margin-top:16px;font-size:15px;color:var(--muted)}
+.review-out strong{color:var(--ink)}
+.points{list-style:none;padding:0;margin:0;display:grid;gap:28px}
+.points h3{font:700 22px/1.2 var(--display);margin:0 0 6px}
+.points p{margin:0;color:var(--muted)}
+@media (max-width:860px){.review{grid-template-columns:1fr}}
+
+/* languages */
+.langs{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.lang{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:24px}
+.lang .tag{font-weight:700;font-size:15px;color:var(--muted);margin:0 0 12px}
+.lang p.sample{font-size:19px;line-height:1.55;margin:0}
+.lang[dir="rtl"] .tag{text-align:right}
+@media (max-width:860px){.langs{grid-template-columns:1fr}}
+
+/* orgs */
+.orgs{background:var(--ink);color:#fff;border-radius:18px;padding:56px;display:grid;grid-template-columns:1.2fr 1fr;gap:48px;align-items:center}
+.orgs h2{font:800 clamp(30px,3.6vw,44px)/1.05 var(--display);letter-spacing:-.02em;margin:0 0 14px}
+.orgs p{color:#C9D1E3;margin:0}
+.orgs ul{margin:0;padding-left:20px;color:#E6EAF3}
+.orgs li{margin:8px 0}
+.orgs .btn{border-color:#fff;background:#fff;color:var(--ink);margin-top:24px}
+@media (max-width:860px){.orgs{grid-template-columns:1fr;padding:36px 28px}}
+
+/* faq */
+.faq{max-width:760px}
+.faq details{border-bottom:1px solid var(--rule);padding:20px 0}
+.faq summary{font:700 20px/1.3 var(--display);cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:16px}
+.faq summary::after{content:"+";font-size:26px;line-height:1;transition:transform .2s}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq details p{color:var(--muted);margin:12px 0 0}
+
+.final{text-align:center;padding-block:110px}
+.final h2{font:800 clamp(36px,5vw,60px)/1 var(--display);letter-spacing:-.03em;margin:0 0 26px}
+footer{border-top:1px solid var(--rule);padding:28px 0;color:var(--muted);font-size:15px}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="logo" href="#"><span class="logo-mark" aria-hidden="true"></span>ResumePilot</a>
+  <nav aria-label="Main">
+    <a href="#how">How it works</a>
+    <a href="#trust">Why trust it</a>
+    <a href="#teams">For career centers</a>
+    <a class="btn btn-primary" href="https://resumepilot-app.streamlit.app">Tailor my CV</a>
+  </nav>
+</header>
+
+<main>
+<div class="wrap hero">
+  <div>
+    <h1>Your CV, edited for the job you want.</h1>
+    <p class="lede">Paste a job ad and your CV. ResumePilot rewrites it for that role, shows you every change and the reason behind it, and never adds experience you don't have.</p>
+    <div class="ctas">
+      <a class="btn btn-primary" href="https://resumepilot-app.streamlit.app">Tailor my CV for free</a>
+      <a class="btn btn-ghost" href="#how">See how it works</a>
+    </div>
+    <small>Free to use. English, Hebrew and Arabic. Download as a Word file.</small>
+  </div>
+
+  <div class="doc-stage" aria-label="Example: a CV edited for a Data Analyst job, with notes explaining each change">
+    <div class="doc">
+      <p class="name">Maya Haddad</p>
+      <p class="contact">Junior Data Analyst · Haifa</p>
+      <h4>Summary</h4>
+      <ul style="list-style:none;padding:0">
+        <li><span class="del seq s1">Hard-working student looking for opportunities.</span> <span class="ins seq s2">Statistics graduate who builds <span class="hl">SQL</span> and Python reports for business teams.</span></li>
+      </ul>
+      <h4>Experience</h4>
+      <p class="role">Data Intern, Northline Logistics</p>
+      <p class="meta">2024 – 2025</p>
+      <ul>
+        <li><span class="del seq s3">Helped with reports.</span> <span class="ins seq s4">Built a weekly <span class="hl">Tableau</span> dashboard used by 3 teams.</span></li>
+        <li><span class="del seq s5">Worked with data.</span> <span class="ins seq s6">Cleaned 2M rows of shipping data with <span class="hl">SQL</span>, cutting report time from 2 days to 3 hours.</span></li>
+      </ul>
+    </div>
+    <p class="note note-1 seq s2"><b>Job asks for</b>SQL and Python</p>
+    <p class="note note-2 seq s4"><b>Job asks for</b>Tableau dashboards</p>
+    <p class="note note-3 seq s6"><b>From your answer</b>"2 days down to 3 hours"</p>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Four steps, about five minutes.</h2>
+      <p>No account, no templates to fight with.</p>
+    </div>
+    <ol class="steps">
+      <li><h3>Paste the job ad</h3><p>Any role, in any of the three languages.</p></li>
+      <li><h3>Add your CV</h3><p>Upload a PDF or Word file, or paste the text.</p></li>
+      <li><h3>Answer a few questions</h3><p>Short questions pull out the real numbers and results your CV is missing.</p></li>
+      <li><h3>Review and download</h3><p>Keep or undo each change, edit anything, then download a Word file.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="wrap review">
+    <div>
+      <div class="sec-head" style="margin-bottom:32px">
+        <h2>You decide what stays.</h2>
+        <p>Every change comes with a reason. Try it:</p>
+      </div>
+      <div class="review-card">
+        <p class="why"><strong>Improved:</strong> named the tool and the result.</p>
+        <p class="req">Job asks for: <span>experience with Tableau</span></p>
+        <div class="compare">
+          <div><b>Your original</b>Helped with reports.</div>
+          <div><b>AI version</b>Built a weekly Tableau dashboard used by 3 teams.</div>
+        </div>
+        <div class="toggle" role="group" aria-label="Which version goes in your CV">
+          <button type="button" aria-pressed="true" data-v="ai">Keep the AI version</button>
+          <button type="button" aria-pressed="false" data-v="orig">Go back to my original</button>
+        </div>
+        <p class="review-out" aria-live="polite">In your CV: <strong id="out">Built a weekly Tableau dashboard used by 3 teams.</strong></p>
+      </div>
+    </div>
+    <ul class="points">
+      <li><h3>Nothing invented</h3><p>After every rewrite, ResumePilot checks that no job, degree or date went missing, and that no new dates appeared. If something looks wrong, it keeps your original text and tells you why.</p></li>
+      <li><h3>Honest about gaps</h3><p>If the job needs a skill you don't have, it tells you instead of slipping it into your CV.</p></li>
+      <li><h3>Your data stays yours</h3><p>ResumePilot doesn't store your CV. It is sent to the AI only to write your tailored version, and it is never sent to anyone else.</p></li>
+    </ul>
+  </div>
+</section>
+
+<section id="languages">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Written for the Israeli job market, in three languages.</h2>
+      <p>Hebrew and Arabic CVs come out right-to-left, with tech names kept in English. In Hebrew you choose neutral, feminine or masculine wording.</p>
+    </div>
+    <div class="langs">
+      <div class="lang"><p class="tag">English</p><p class="sample">Built a weekly Tableau dashboard used by 3 teams.</p></div>
+      <div class="lang" dir="rtl" lang="he"><p class="tag">עברית</p><p class="sample">בנתה דשבורד שבועי ב-Tableau שמשמש 3 צוותים.</p></div>
+      <div class="lang" dir="rtl" lang="ar"><p class="tag">العربية</p><p class="sample">بنيتُ لوحة بيانات أسبوعية في Tableau تستخدمها 3 فرق.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="teams">
+  <div class="wrap">
+    <div class="orgs">
+      <div>
+        <h2>Run a career program or career center?</h2>
+        <p>Your participants tailor their CVs with AI, and your coaches review each change before it goes out. We're starting free pilots with Israeli universities and job-readiness programs.</p>
+        <a class="btn" href="https://resumepilot-app.streamlit.app">Try it with your team</a>
+      </div>
+      <ul>
+        <li>Hebrew, Arabic and English for every participant</li>
+        <li>Coaches see why each change was made</li>
+        <li>No invented experience, checked automatically</li>
+        <li>A short report at the end of the pilot</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap"><div class="faq">
+    <div class="sec-head"><h2>Questions</h2></div>
+    <details><summary>Is it really free?</summary><p>Yes. Each person can run up to 15 AI steps a day, which is enough for about three tailored CVs.</p></details>
+    <details><summary>Will it make things up to get past the system?</summary><p>No. It only rewrites what's already in your CV or what you tell it in your answers. A built-in check stops new jobs, degrees or dates from appearing.</p></details>
+    <details><summary>Do companies reject CVs automatically for missing keywords?</summary><p>Mostly not. Most recruiters read CVs themselves, but they search and skim fast. ResumePilot puts the skills the job asks for where a recruiter will see them, in your own true words.</p></details>
+    <details><summary>Can I upload a CV in Hebrew or Arabic?</summary><p>Yes. Upload it as it is, and choose English, Hebrew or Arabic for the final version.</p></details>
+    <details><summary>What file do I get?</summary><p>A Word file (.docx) you can edit, or plain text.</p></details>
+  </div></div>
+</section>
+
+<div class="wrap final">
+  <h2>Apply with a CV that fits the job.</h2>
+  <a class="btn btn-primary" href="https://resumepilot-app.streamlit.app">Tailor my CV for free</a>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>ResumePilot, made in Jerusalem.</span>
+    <a href="https://github.com/leenabuleil04-ctrl/resumepilot">Source on GitHub</a>
+  </div>
+</footer>
+
+<script>
+  const out = document.getElementById('out');
+  const text = {ai:'Built a weekly Tableau dashboard used by 3 teams.', orig:'Helped with reports.'};
+  document.querySelectorAll('.toggle button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.toggle button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    out.textContent = text[b.dataset.v];
+  }));
+</script>
+</body>
+</html>
