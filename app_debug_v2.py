@@ -20,7 +20,7 @@ from collections import Counter
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="ResumePilot",
-    page_icon="💼",
+    page_icon="📝",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -56,363 +56,155 @@ defaults = {
     'cv_uploaded': False,
     'analysis_done': False,
     'cv_adjusted': False,
-    'show_landing': True,
+    'show_landing': False,         # the website (docs/) is the homepage now
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 # --- CUSTOM CSS ---
+# One design system shared with the website (docs/index.html):
+# navy ink on cool paper, Bricolage Grotesque headings, Atkinson Hyperlegible body,
+# and an editor's palette: red = removed, green = added, yellow = what the job asks for.
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
-
-    /* ── DESIGN TOKENS ── */
     :root {
-        --blue:        #2563EB;
-        --blue-hover:  #1D4ED8;
-        --blue-light:  #EFF6FF;
-        --blue-mid:    #BFDBFE;
-        --text:        #0F172A;
-        --muted:       #64748B;
-        --border:      #E5E7EB;
-        --bg:          #F8FAFC;
-        --card:        #FFFFFF;
-        --success:     #16A34A;
-        --warning:     #F59E0B;
-        --error:       #DC2626;
+        --paper:   #F6F8FB;
+        --sheet:   #FFFFFF;
+        --ink:     #16213A;
+        --muted:   #5A6478;
+        --rule:    #DCE2EC;
+        --strike:  #D6354A;
+        --insert:  #0B7A5C;
+        --mark:    #FFE45C;
+        --action:  #2A3FD6;
+        --display: "Bricolage Grotesque", system-ui, sans-serif;
+        --body:    "Atkinson Hyperlegible", system-ui, sans-serif;
+        /* old names kept so existing markup picks up the new look */
+        --blue: var(--ink); --blue-hover: #0E1628; --blue-light: #EEF1FB; --blue-mid: #D5DCF5;
+        --text: var(--ink); --border: var(--rule); --bg: var(--paper); --card: var(--sheet);
+        --success: var(--insert); --warning: #B7791F; --error: var(--strike);
     }
 
-    /* ── GLOBAL RESETS ── */
-    .block-container {
-        padding-top: 0 !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        max-width: 880px !important;
-        background: var(--bg) !important;
+    html, body, .stApp, [class*="css"], .stMarkdown, p, li, label, input, textarea, button, select {
+        font-family: var(--body) !important;
     }
-    .stApp { background: var(--bg) !important; }
-    #MainMenu, footer, header { visibility: hidden; }
+    .stApp { background: var(--paper) !important; color: var(--ink); }
+    .block-container { padding: 0 24px 64px !important; max-width: 920px !important; }
     div[data-testid="stTabs"] { display: none; }
+    a { color: var(--action); }
+    h1, h2, h3, h4 { font-family: var(--display) !important; color: var(--ink) !important; letter-spacing: -0.02em; }
+    :focus-visible { outline: 3px solid var(--action) !important; outline-offset: 2px; }
 
-    /* ── STEP BAR ── */
-    .rp-step-bar {
-        display: flex;
-        align-items: center;
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 12px 18px;
-        margin-bottom: 28px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        gap: 0;
-    }
-    .rp-step-item { display: flex; align-items: center; gap: 8px; flex: 1; }
-    .rp-step-dot {
-        width: 22px; height: 22px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 10px; font-weight: 700; flex-shrink: 0;
-        transition: all 0.2s;
-    }
-    .rp-dot-done   { background: var(--blue); color: white; }
-    .rp-dot-active { background: var(--text); color: white; }
-    .rp-dot-todo   { background: var(--border); color: #9CA3AF; }
-    .rp-step-name  { font-size: 12px; font-weight: 500; }
-    .rp-name-done  { color: var(--blue); font-weight: 600; }
-    .rp-name-active{ color: var(--text); font-weight: 700; }
-    .rp-name-todo  { color: #9CA3AF; }
-    .rp-connector  { height: 2px; width: 20px; flex-shrink: 0; }
-    .rp-conn-done  { background: var(--blue); }
-    .rp-conn-todo  { background: var(--border); }
+    /* ── HEADER ── */
+    .rp-header { display: flex; align-items: center; gap: 10px; padding: 22px 0 18px; margin-bottom: 8px; }
+    .rp-logo { display: flex; align-items: center; gap: 10px; text-decoration: none !important; }
+    .rp-logo-mark { width: 26px; height: 32px; background: var(--sheet); border: 2px solid var(--ink); border-radius: 4px; position: relative; flex-shrink: 0; }
+    .rp-logo-mark::before { content: ""; position: absolute; left: 4px; right: 4px; top: 8px; height: 3px; background: var(--strike); }
+    .rp-logo-mark::after  { content: ""; position: absolute; left: 4px; right: 8px; top: 16px; height: 6px; background: var(--mark); }
+    .rp-brand { font: 800 21px/1 var(--display); color: var(--ink); letter-spacing: -0.01em; }
+    .rp-tagline { margin-left: auto; font-size: 15px; font-weight: 700; }
+    .rp-tagline a { color: var(--ink); text-decoration: none; }
+    .rp-tagline a:hover { text-decoration: underline; }
 
-    /* ── LOGO / HEADER ── */
-    .rp-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 18px 0 16px;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 28px;
-    }
-    .rp-brand   { font-size: 17px; font-weight: 700; letter-spacing: -0.4px; color: var(--text); }
-    .rp-tagline { font-size: 13px; color: var(--muted); margin-left: auto; }
+    /* ── STEP BAR: same numbered rule as the website's "how it works" ── */
+    .rp-step-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 8px 0 40px; }
+    .rp-step-item { border-top: 3px solid var(--rule); padding-top: 10px; }
+    .rp-step-item.done   { border-top-color: var(--insert); }
+    .rp-step-item.active { border-top-color: var(--ink); }
+    .rp-step-num  { font: 800 20px/1 var(--display); color: #A3ACBD; }
+    .rp-step-name { font-size: 14px; font-weight: 700; color: #8A93A6; margin-top: 4px; }
+    .rp-step-item.done .rp-step-num, .rp-step-item.done .rp-step-name { color: var(--insert); }
+    .rp-step-item.active .rp-step-num, .rp-step-item.active .rp-step-name { color: var(--ink); }
+    @media (max-width: 640px) { .rp-step-name { display: none; } .rp-step-bar { gap: 6px; } }
 
     /* ── PAGE TITLES ── */
-    .rp-page-badge { font-size: 11px; color: var(--blue); font-weight: 600; letter-spacing: 0.6px; margin-bottom: 6px; text-transform: uppercase; }
-    .rp-page-title { font-size: 26px; font-weight: 700; letter-spacing: -0.6px; color: var(--text); margin-bottom: 5px; }
-    .rp-page-sub   { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.6; }
+    .rp-page-badge { font-size: 15px; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+    .rp-page-title { font: 800 clamp(34px, 5vw, 48px)/1.02 var(--display); letter-spacing: -0.03em; color: var(--ink); margin-bottom: 12px; }
+    .rp-page-sub   { font-size: 19px; color: var(--muted); margin-bottom: 32px; line-height: 1.55; max-width: 36em; }
 
     /* ── CARDS ── */
-    .rp-card, .rp-card-white, .content-card {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 16px 20px;
-        margin-bottom: 16px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    .rp-card, .rp-card-white, .content-card, .rp-checklist {
+        background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px;
+        padding: 18px 22px; margin-bottom: 16px; box-shadow: none;
     }
-    .rp-card { background: var(--bg); }
-
-    /* ── PILLS ── */
-    .rp-pill { font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 9999px; }
-    .rp-pill-strong  { background: #DCFCE7; color: #166534; }
-    .rp-pill-partial { background: #FEF9C3; color: #92400E; }
-    .rp-pill-missing { background: #FEE2E2; color: #991B1B; }
-
-    /* ── TIP BOX ── */
-    .rp-tip {
-        background: var(--blue-light);
-        border: 1px solid var(--blue-mid);
-        border-radius: 10px;
-        padding: 14px 16px;
-        font-size: 13px;
-        color: #1E40AF;
-        line-height: 1.6;
-        margin-top: 14px;
-    }
-
-    /* ── REFINEMENT QUESTION NUM ── */
-    .rp-q-num {
-        display: inline-flex; align-items: center; justify-content: center;
-        background: var(--blue); color: white;
-        width: 20px; height: 20px; border-radius: 50%;
-        font-size: 10px; font-weight: 700; margin-right: 6px;
-    }
-    .rp-q-text { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 8px; }
-
-    /* ── DOWNLOAD CARDS ── */
-    .rp-dl-fmt  { font-weight: 700; font-size: 15px; margin-bottom: 3px; color: var(--text); }
-    .rp-dl-desc { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
-
-    /* ── CHECKLIST ── */
-    .rp-checklist { border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .rp-checklist-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text); }
-    .rp-check-item { font-size: 12px; color: var(--muted); padding: 5px 0; border-bottom: 1px solid var(--border); }
+    .rp-pill { font-size: 13px; font-weight: 700; padding: 2px 10px; border-radius: 9999px; }
+    .rp-pill-strong  { background: #EAF6F1; color: var(--insert); }
+    .rp-pill-partial { background: #FFF6C2; color: #6B5A00; }
+    .rp-pill-missing { background: #FBE9EC; color: #B4233A; }
+    .rp-tip { background: var(--sheet); border-left: 3px solid var(--mark); border-radius: 0 8px 8px 0; padding: 14px 16px; font-size: 16px; color: var(--ink); line-height: 1.55; margin-top: 14px; }
+    .rp-q-num { display: inline-flex; align-items: center; justify-content: center; background: var(--ink); color: #fff; width: 24px; height: 24px; border-radius: 50%; font: 800 13px var(--display); margin-right: 8px; }
+    .rp-q-text { font-size: 17px; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+    .rp-dl-fmt  { font: 700 19px var(--display); margin-bottom: 3px; color: var(--ink); }
+    .rp-dl-desc { font-size: 15px; color: var(--muted); margin-bottom: 14px; }
+    .rp-checklist-title { font: 700 18px var(--display); margin-bottom: 10px; color: var(--ink); }
+    .rp-check-item { font-size: 15px; color: var(--muted); padding: 7px 0; border-bottom: 1px solid var(--rule); }
     .rp-check-item:last-child { border-bottom: none; }
+    .alert-box { padding: 12px 16px; border-radius: 8px; font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+    .alert-green  { background: #EAF6F1; color: var(--insert); }
+    .alert-orange { background: #FFF6C2; color: #6B5A00; }
+    .alert-red    { background: #FBE9EC; color: #B4233A; }
 
-    /* ── ALERT BOXES ── */
-    .alert-box { padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 12px; }
-    .alert-green  { background: #DCFCE7; color: #166534; }
-    .alert-orange { background: #FEF3C7; color: #92400E; }
-    .alert-red    { background: #FEE2E2; color: #991B1B; }
-
-    /* ── PRIMARY BUTTON ── */
+    /* ── BUTTONS: same as the website ── */
     .stButton > button, .stDownloadButton > button {
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        font-size: 13px !important;
-        font-family: 'Inter', sans-serif !important;
-        transition: all 0.15s !important;
-        padding: 8px 18px !important;
-    }
-    .stButton > button[kind="primary"],
-    .stDownloadButton > button[kind="primary"] {
-        background: var(--blue) !important;
-        color: white !important;
-        border: none !important;
-        box-shadow: 0 1px 3px rgba(37,99,235,0.3) !important;
-    }
-    .stButton > button[kind="primary"]:hover,
-    .stDownloadButton > button[kind="primary"]:hover {
-        background: var(--blue-hover) !important;
-        box-shadow: 0 2px 8px rgba(37,99,235,0.4) !important;
-    }
-    .stButton > button[kind="secondary"],
-    .stDownloadButton > button[kind="secondary"] {
-        background: transparent !important;
-        color: var(--blue) !important;
-        border: 1.5px solid var(--blue) !important;
-    }
-    .stButton > button[kind="secondary"]:hover,
-    .stDownloadButton > button[kind="secondary"]:hover {
-        background: var(--blue-light) !important;
-    }
-    /* Disabled button */
-    .stButton > button:disabled {
-        background: #E5E7EB !important;
-        color: #9CA3AF !important;
-        border: none !important;
+        border-radius: 12px !important; font: 700 16px/1 var(--body) !important;
+        padding: 14px 20px !important; min-height: 50px; transition: transform .15s ease !important;
+        border: 2px solid var(--ink) !important; background: transparent !important; color: var(--ink) !important;
         box-shadow: none !important;
-        cursor: not-allowed !important;
     }
+    .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-2px); }
+    .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
+        background: var(--ink) !important; color: #fff !important;
+    }
+    .stButton > button p, .stDownloadButton > button p, .stButton > button div, .stDownloadButton > button div { font: 700 16px/1.2 var(--body) !important; color: inherit !important; }
+    .stButton > button:disabled { background: #E7EBF2 !important; color: #8A93A6 !important; border-color: #E7EBF2 !important; transform: none; cursor: not-allowed !important; }
 
-    /* ── INPUT FIELDS ── */
+    /* ── INPUTS ── */
     .stTextInput input, .stTextArea textarea {
-        border-radius: 8px !important;
-        border: 1.5px solid var(--border) !important;
-        background: var(--card) !important;
-        font-size: 13px !important;
-        font-family: 'Inter', sans-serif !important;
-        color: var(--text) !important;
-        transition: border-color 0.15s !important;
+        border-radius: 10px !important; border: 1.5px solid var(--rule) !important; background: var(--sheet) !important;
+        font-size: 17px !important; color: var(--ink) !important; padding: 12px 14px !important;
     }
-    .stTextInput input:focus, .stTextArea textarea:focus {
-        border-color: var(--blue) !important;
-        box-shadow: 0 0 0 3px rgba(37,99,235,0.1) !important;
-        background: white !important;
+    .stTextInput input:focus, .stTextArea textarea:focus { border-color: var(--action) !important; box-shadow: 0 0 0 3px rgba(42,63,214,.15) !important; }
+    .stTextInput label p, .stTextArea label p, .stFileUploader label p, div[data-testid="stRadio"] > label p {
+        font-size: 16px !important; font-weight: 700 !important; color: var(--ink) !important;
     }
-    .stTextInput label, .stTextArea label, .stFileUploader label {
-        font-size: 13px !important;
-        font-weight: 600 !important;
-        color: var(--text) !important;
-    }
+    [data-testid="stFileUploaderDropzone"] { background: var(--sheet) !important; border: 2px dashed var(--rule) !important; border-radius: 12px !important; }
 
-    /* ── RADIO AS SELECTABLE CARDS ── */
-    div[data-testid="stRadio"] > label {
-        font-size: 13px !important;
-        font-weight: 600 !important;
-        color: var(--text) !important;
-        margin-bottom: 10px !important;
-    }
-    div[data-testid="stRadio"] > div[role="radiogroup"] {
-        display: flex !important;
-        flex-direction: row !important;
-        gap: 10px !important;
-        flex-wrap: wrap !important;
-    }
+    /* ── RADIOS AS CHOICE CARDS ── */
+    div[data-testid="stRadio"] > div[role="radiogroup"] { display: flex !important; flex-direction: row !important; gap: 10px !important; flex-wrap: wrap !important; }
     div[data-testid="stRadio"] > div[role="radiogroup"] > label {
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        background: var(--card) !important;
-        border: 1.5px solid var(--border) !important;
-        border-radius: 8px !important;
-        padding: 10px 16px !important;
-        cursor: pointer !important;
-        transition: all 0.15s !important;
-        font-size: 13px !important;
-        font-weight: 500 !important;
-        color: var(--text) !important;
-        min-width: 130px !important;
+        display: flex !important; align-items: center !important; gap: 8px !important;
+        background: var(--sheet) !important; border: 2px solid var(--rule) !important; border-radius: 10px !important;
+        padding: 10px 16px !important; cursor: pointer !important; min-width: 130px !important;
     }
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
-        border-color: var(--blue) !important;
-        background: var(--blue-light) !important;
-        color: var(--blue) !important;
-        font-weight: 600 !important;
-    }
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {
-        border-color: var(--blue) !important;
-    }
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label p { font-size: 16px !important; font-weight: 700 !important; color: var(--ink) !important; }
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) { border-color: var(--ink) !important; }
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover { border-color: var(--ink) !important; }
 
-    /* ── EXPANDER ── */
-    .streamlit-expanderHeader {
-        font-size: 13px !important;
-        font-weight: 600 !important;
-        color: var(--text) !important;
-        border-radius: 8px !important;
-        background: var(--card) !important;
-        border: 1px solid var(--border) !important;
-    }
+    /* ── EXPANDERS / ALERTS ── */
+    div[data-testid="stExpander"] details { border: 1px solid var(--rule) !important; border-radius: 10px !important; background: var(--sheet) !important; }
+    div[data-testid="stExpander"] summary p { font: 700 17px var(--display) !important; color: var(--ink) !important; }
+    div[data-testid="stAlert"], div[data-testid="stNotification"] { border-radius: 10px !important; }
 
-    /* ── STREAMLIT INFO / WARNING / ERROR ── */
-    div[data-testid="stNotification"] {
-        border-radius: 10px !important;
-    }
+    /* ── SCORE CARD ── */
+    .rp-score-dark { background: var(--ink); color: #fff; border-radius: 14px; padding: 26px 30px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .rp-score-num   { font: 800 64px/1 var(--display); letter-spacing: -0.04em; }
+    .rp-score-label { font-size: 15px; color: rgba(255,255,255,.7); margin-bottom: 4px; }
+    .rp-score-desc  { font-size: 15px; color: rgba(255,255,255,.7); margin-top: 6px; }
+    .rp-score-right { text-align: right; font-size: 15px; line-height: 2; }
+    .rp-score-s { color: #8FE0C2; } .rp-score-p { color: var(--mark); } .rp-score-m { color: #F5A3AE; }
+    .rp-analysis-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 8px; background: var(--sheet); border: 1px solid var(--rule); margin-bottom: 6px; font-size: 16px; color: var(--ink); }
 
-    /* ── SCORE DARK CARD ── */
-    .rp-score-dark {
-        background: var(--text);
-        color: white;
-        border-radius: 12px;
-        padding: 22px 26px;
-        display: flex; align-items: center; justify-content: space-between;
-        margin-bottom: 14px;
-    }
-    .rp-score-num   { font-size: 48px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
-    .rp-score-label { font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 3px; letter-spacing: 0.4px; }
-    .rp-score-desc  { font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 4px; }
-    .rp-score-right { text-align: right; font-size: 12px; line-height: 2.2; }
-    .rp-score-s { color: #86EFAC; }
-    .rp-score-p { color: rgba(255,255,255,0.5); }
-    .rp-score-m { color: rgba(255,255,255,0.3); }
-
-    /* ── ANALYSIS ITEMS ── */
-    .rp-analysis-item {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 9px 13px; border-radius: 8px;
-        background: var(--bg); border: 1px solid var(--border);
-        margin-bottom: 5px; font-size: 13px; color: var(--text);
-    }
-
-    /* ── LANDING PAGE ── */
-    .rp-hero { max-width: 640px; margin: 0 auto; padding: 80px 32px 48px; text-align: center; }
-    .rp-hero h1 {
-        font-size: 50px; font-weight: 800; line-height: 1.1;
-        letter-spacing: -2px; margin-bottom: 20px; color: var(--text);
-    }
-    .rp-hero h1 span { color: var(--blue); }
-    .rp-hero p {
-        font-size: 16px; color: var(--muted); line-height: 1.7;
-        max-width: 460px; margin: 0 auto 36px;
-    }
-
-    /* ── BENTO GRID ── */
-    .rp-bento {
-        max-width: 840px; margin: 40px auto 0; padding: 0 32px 56px;
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        grid-template-rows: auto auto;
-        gap: 12px;
-    }
-    .rp-bento-cell {
-        background: var(--card);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 22px;
-        position: relative; overflow: hidden;
-        transition: box-shadow 0.2s, transform 0.2s;
-    }
-    .rp-bento-cell:hover {
-        box-shadow: 0 6px 24px rgba(37,99,235,0.08);
-        transform: translateY(-1px);
-    }
-    .rp-bento-cell::after {
-        content: '';
-        position: absolute; top: 0; left: 0; right: 0; height: 3px;
-        background: var(--blue);
-        transform: scaleX(0); transform-origin: left;
-        transition: transform 0.25s;
-    }
-    .rp-bento-cell:hover::after { transform: scaleX(1); }
-    .rp-bento-icon  { font-size: 20px; margin-bottom: 10px; }
-    .rp-bento-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
-    .rp-bento-desc  { font-size: 12px; color: var(--muted); line-height: 1.55; }
-
-    /* ── HOW IT WORKS ── */
-    .rp-how {
-        background: var(--bg);
-        border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-        padding: 60px 32px;
-    }
-    .rp-how-inner  { max-width: 700px; margin: 0 auto; }
-    .rp-how-label  { font-size: 11px; font-weight: 600; color: var(--blue); letter-spacing: 1px; text-align: center; margin-bottom: 10px; text-transform: uppercase; }
-    .rp-how-title  { font-size: 28px; font-weight: 700; letter-spacing: -0.8px; text-align: center; margin-bottom: 40px; color: var(--text); }
-    .rp-how-steps  { display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; }
-    .rp-how-step   { text-align: center; }
-    .rp-how-num    { width: 34px; height: 34px; border-radius: 50%; background: var(--blue); color: white; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; }
-    .rp-how-step-title { font-size: 14px; font-weight: 600; margin-bottom: 5px; color: var(--text); }
-    .rp-how-step-desc  { font-size: 12px; color: var(--muted); line-height: 1.55; }
-
-    /* ── CTA + FOOTER ── */
-    .rp-cta { max-width: 560px; margin: 0 auto; padding: 64px 32px; text-align: center; }
-    .rp-cta h2 { font-size: 30px; font-weight: 700; letter-spacing: -0.8px; margin-bottom: 12px; color: var(--text); }
-    .rp-cta p  { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
-    .rp-footer { border-top: 1px solid var(--border); padding: 20px 48px; display: flex; align-items: center; justify-content: space-between; }
-    .rp-footer-brand { font-weight: 700; font-size: 14px; color: var(--text); }
-    .rp-footer-p     { font-size: 12px; color: var(--muted); }
-
-    /* ── SCORE ROW ON LANDING ── */
-    .rp-score-row {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 7px 11px; border-radius: 6px;
-        background: var(--bg); border: 1px solid var(--border);
-        margin-bottom: 4px; font-size: 13px;
-    }
+    /* ── TRACKED CHANGES (the review step) ── */
+    .rp-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 20px; font-size: 16px; line-height: 1.7; white-space: pre-wrap; color: var(--ink); }
+    .rp-del { color: var(--strike); text-decoration: line-through; text-decoration-thickness: 2px; }
+    .rp-ins { color: var(--insert); font-weight: 700; }
+    .rp-why { border-left: 3px solid var(--mark); padding: 2px 0 2px 12px; margin: 0 0 12px; font-size: 15px; }
+    .rp-why b { display: block; font-size: 13px; color: var(--muted); }
+    .rp-why .req { background: linear-gradient(transparent 55%, var(--mark) 55%); }
+    .rp-legend { font-size: 15px; color: var(--muted); margin: -18px 0 18px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -846,7 +638,7 @@ def claude_api_call(prompt, max_tokens=3000):
     if not allowed:
         st.session_state['_last_api_error'] = limit_msg
         if not st.session_state.get('_limit_warning_shown'):
-            st.warning("⏳ " + limit_msg)
+            st.warning("" + limit_msg)
             st.session_state['_limit_warning_shown'] = True
         return None
     import urllib.request
@@ -1268,6 +1060,112 @@ def apply_review_choices(base_data, ai_sections, choices, edits):
     return build_final_cv(base_data, chosen, None)
 
 
+def render_match_report(ai, score):
+    """The Match step as clean HTML blocks in the same style as the website."""
+    color = "var(--insert)" if score >= 70 else ("#B7791F" if score >= 35 else "var(--strike)")
+    label = _esc(ai.get("match_label", "") or ("Strong match" if score >= 70 else "Partial match" if score >= 35 else "Low match"))
+    rationale = _esc(ai.get("score_rationale", ""))
+    strengths = ai.get("cv_strengths", []) or []
+    gaps = ai.get("cv_weaknesses", []) or ai.get("critical_gaps", []) or []
+    present = (ai.get("ats_keywords_present", []) or [])[:14]
+    missing = (ai.get("ats_keywords_missing", []) or [])[:14]
+    metrics = ai.get("metrics_missing", []) or []
+    wins = ai.get("quick_wins", []) or []
+
+    def items(lst, cls, mark, empty):
+        if not lst:
+            return f'<p class="rp-empty">{empty}</p>'
+        return "".join(f'<li class="{cls}"><span aria-hidden="true">{mark}</span>{_esc(x)}</li>' for x in lst)
+
+    html = f"""<style>
+.rp-score{{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:26px 30px;margin-bottom:20px}}
+.rp-score .n{{font:800 88px/0.9 var(--display);letter-spacing:-.04em}}
+.rp-score .l{{font:800 24px/1.2 var(--display);margin:0 0 6px;color:var(--ink)}}
+.rp-score p{{margin:0;color:var(--muted);font-size:17px;line-height:1.55}}
+.rp-two{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}}
+.rp-box{{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:20px 22px}}
+.rp-box h3{{font:700 20px/1.2 var(--display);margin:0 0 12px;color:var(--ink)}}
+.rp-box ul{{list-style:none;margin:0;padding:0}}
+.rp-box li{{display:flex;gap:10px;font-size:16px;line-height:1.5;margin:8px 0;color:var(--ink)}}
+.rp-box li span{{font-weight:700;flex-shrink:0}}
+.rp-box li.ok span{{color:var(--insert)}} .rp-box li.no span{{color:var(--strike)}}
+.rp-empty{{color:var(--muted);margin:0;font-size:16px}}
+.rp-chip{{display:inline-block;font-size:15px;font-weight:700;padding:4px 10px;border-radius:6px;margin:0 6px 8px 0}}
+.rp-chip.ok{{background:#EAF6F1;color:var(--insert)}}
+.rp-chip.no{{background:var(--mark);color:var(--ink)}}
+.rp-box .sub{{font-size:14px;color:var(--muted);margin:4px 0 8px;font-weight:700}}
+.rp-notes li{{border-left:3px solid var(--mark);padding-left:12px}}
+@media (max-width:640px){{.rp-two{{grid-template-columns:1fr}}.rp-score{{grid-template-columns:1fr}}}}
+</style>
+<div class="rp-score"><div class="n" style="color:{color}">{score}%</div><div><p class="l">{label}</p><p>{rationale}</p></div></div>
+<div class="rp-two">
+<div class="rp-box"><h3>Already fits the job</h3><ul>{items(strengths, "ok", "✓", "Nothing clear yet. The questions in the next step can help.")}</ul></div>
+<div class="rp-box"><h3>Missing or weak</h3><ul>{items(gaps, "no", "✗", "No major gaps found.")}</ul></div>
+</div>"""
+    if present or missing:
+        html += '<div class="rp-box" style="margin-bottom:20px"><h3>Words from the job ad</h3>'
+        if present:
+            html += '<p class="sub">Already in your CV</p><div>' + "".join(f'<span class="rp-chip ok">{_esc(k)}</span>' for k in present) + "</div>"
+        if missing:
+            html += '<p class="sub">Not in your CV yet. We only add them if they are true for you.</p><div>' + "".join(f'<span class="rp-chip no">{_esc(k)}</span>' for k in missing) + "</div>"
+        html += "</div>"
+    if metrics or wins:
+        html += '<div class="rp-two">'
+        if wins:
+            html += f'<div class="rp-box rp-notes"><h3>Quick wins</h3><ul>{items(wins, "", "", "")}</ul></div>'
+        if metrics:
+            html += f'<div class="rp-box rp-notes"><h3>Lines that need a number</h3><ul>{items(metrics, "", "", "")}</ul></div>'
+        html += "</div>"
+    return html
+
+
+def diff_html(before, after):
+    """Tracked changes, readable like an editor's markup.
+
+    Lines are compared first. A line that changed a little gets word-level marks;
+    a line that was rewritten shows the old line struck through, then the new line.
+    """
+    import difflib
+
+    def word_diff(old, new):
+        a, b = old.split(), new.split()
+        lead = old[:len(old) - len(old.lstrip())]
+        parts = []
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if op == "equal":
+                parts.append(_esc(" ".join(a[i1:i2])))
+                continue
+            if i2 > i1:
+                parts.append(f'<span class="rp-del">{_esc(" ".join(a[i1:i2]))}</span>')
+            if j2 > j1:
+                parts.append(f'<span class="rp-ins">{_esc(" ".join(b[j1:j2]))}</span>')
+        return _esc(lead) + " ".join(parts)
+
+    def line_change(old, new):
+        if not old.strip():
+            return f'<span class="rp-ins">{_esc(new)}</span>'
+        if not new.strip():
+            return f'<span class="rp-del">{_esc(old)}</span>'
+        if difflib.SequenceMatcher(None, old, new).ratio() >= 0.6:
+            return word_diff(old, new)
+        return f'<span class="rp-del">{_esc(old.strip())}</span> <span class="rp-ins">{_esc(new.strip())}</span>'
+
+    a_lines = (before or "").splitlines()
+    b_lines = (after or "").splitlines()
+    out = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False).get_opcodes():
+        if op == "equal":
+            out.extend(_esc(l) for l in a_lines[i1:i2])
+        elif op == "delete":
+            out.extend(f'<span class="rp-del">{_esc(l)}</span>' for l in a_lines[i1:i2])
+        elif op == "insert":
+            out.extend(f'<span class="rp-ins">{_esc(l)}</span>' for l in b_lines[j1:j2])
+        else:
+            old, new = a_lines[i1:i2], b_lines[j1:j2]
+            for k in range(max(len(old), len(new))):
+                out.append(line_change(old[k] if k < len(old) else "", new[k] if k < len(new) else ""))
+    return "\n".join(out)
+
 def render_change_review(base_data, ai_sections, improvement_log):
     """Show each changed section: why it changed, before/after, keep or undo, and edit."""
     changed = [
@@ -1279,9 +1177,10 @@ def render_change_review(base_data, ai_sections, improvement_log):
         return build_final_cv(base_data, ai_sections, None)
 
     grouped = changes_by_section(improvement_log)
-    st.markdown("#### ✍️ Review the changes")
-    st.caption("Each change shows why it was made and which job requirement it targets. "
-               "Keep it, go back to your original, or edit the text yourself.")
+    st.markdown("### Review the changes")
+    st.markdown('<p class="rp-legend"><span class="rp-del">Red</span> was removed, '
+                '<span class="rp-ins">green</span> was added, and the yellow notes say what the job asks for.</p>',
+                unsafe_allow_html=True)
 
     choices, edits = {}, {}
     for key, label in changed:
@@ -1289,20 +1188,15 @@ def render_change_review(base_data, ai_sections, improvement_log):
         use_key, text_key = f"review_use_{key}", f"review_text_{key}"
         status = "AI version" if st.session_state.get(use_key, "ai") == "ai" else "your original"
         count = f"{len(reasons)} change{'s' if len(reasons) != 1 else ''}" if reasons else "changed"
-        with st.expander(f"{label} — {count} · using {status}"):
+        with st.expander(f"{label}: {count}, using {status}"):
             for item in reasons:
-                line = f"**{item.get('type', 'Changed')}:** {item.get('description', '')}"
                 req = str(item.get("job_requirement", "") or "").strip()
+                note = f'<b>{_esc(item.get("type", "Changed"))}</b>{_esc(item.get("description", ""))}'
                 if req:
-                    line += f"  \n🎯 *Job asks for:* {req}"
-                st.markdown(line)
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Before (your original)**")
-                st.text(base_data.get(key, "") or "—")
-            with c2:
-                st.markdown("**After (AI)**")
-                st.text(ai_sections.get(key, ""))
+                    note += f'<br>Job asks for: <span class="req">{_esc(req)}</span>'
+                st.markdown(f'<div class="rp-why">{note}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="rp-diff">{diff_html(base_data.get(key, ""), ai_sections.get(key, ""))}</div>',
+                        unsafe_allow_html=True)
             choice = st.radio(
                 "Which version goes in your CV?", ["ai", "original"],
                 format_func=lambda v: "Keep the AI version" if v == "ai" else "Go back to my original",
@@ -1782,7 +1676,7 @@ def render_cv_html(cv_data, lang="English"):
         text-align: center;
         letter-spacing: 0.5px;
         margin-bottom: 4px;
-        color: #0f172a;
+        color: #16213A;
         text-transform: uppercase;
     }}
     .isr-contact {{
@@ -1793,13 +1687,13 @@ def render_cv_html(cv_data, lang="English"):
     }}
     .isr-divider {{
         border: none;
-        border-top: 1.5px solid #0f172a;
+        border-top: 1.5px solid #16213A;
         margin: 8px 0 14px 0;
     }}
     .isr-section-title {{
         font-size: 11.5pt;
         font-weight: 700;
-        color: #1e293b;
+        color: #16213A;
         text-transform: uppercase;
         letter-spacing: 0.8px;
         border-bottom: 1px solid #94a3b8;
@@ -1814,13 +1708,13 @@ def render_cv_html(cv_data, lang="English"):
         align-items: baseline;
         flex-direction: {'row-reverse' if is_rtl else 'row'};
     }}
-    .isr-entry-title {{ font-weight: 700; font-size: 10.5pt; color: #0f172a; }}
-    .isr-entry-date  {{ font-size: 9.5pt; color: #475569; font-weight: 600; white-space: nowrap; }}
-    .isr-entry-sub   {{ font-size: 10pt; color: #475569; font-style: italic; margin-bottom: 3px; }}
+    .isr-entry-title {{ font-weight: 700; font-size: 10.5pt; color: #16213A; }}
+    .isr-entry-date  {{ font-size: 9.5pt; color: #5A6478; font-weight: 600; white-space: nowrap; }}
+    .isr-entry-sub   {{ font-size: 10pt; color: #5A6478; font-style: italic; margin-bottom: 3px; }}
     .isr-bullets     {{ margin: 3px 0; {'padding-right:16px;padding-left:0;' if is_rtl else 'padding-left:16px;'} }}
-    .isr-bullets li  {{ font-size: 10pt; color: #1e293b; margin-bottom: 2px; }}
+    .isr-bullets li  {{ font-size: 10pt; color: #16213A; margin-bottom: 2px; }}
     .isr-skills-row  {{ margin-bottom: 4px; font-size: 10pt; }}
-    .isr-skills-label{{ font-weight: 700; color: #1e293b; }}
+    .isr-skills-label{{ font-weight: 700; color: #16213A; }}
     </style>
     """
 
@@ -1885,7 +1779,7 @@ def render_cv_html(cv_data, lang="English"):
     if cv_data.get("summary"):
         html += sec(h[1])
         summary = cv_data["summary"].replace('\n', ' ').strip()
-        html += f'<div style="font-size:10.5pt;color:#1e293b;line-height:1.5;margin-bottom:8px;">{_esc(summary)}</div>'
+        html += f'<div style="font-size:10.5pt;color:#16213A;line-height:1.5;margin-bottom:8px;">{_esc(summary)}</div>'
 
     # 2. EDUCATION
     if cv_data.get("education"):
@@ -1949,7 +1843,7 @@ def render_cv_html(cv_data, lang="English"):
     if cv_data.get("languages"):
         html += sec(h[7])
         langs = re.sub(r'\s*•\s*', ' · ', cv_data["languages"]).strip(' ·')
-        html += f'<div style="font-size:10pt;color:#1e293b;">{_esc(langs)}</div>'
+        html += f'<div style="font-size:10pt;color:#16213A;">{_esc(langs)}</div>'
 
     # 8. COURSES (if exists)
     if cv_data.get("courses_training"):
@@ -2334,8 +2228,8 @@ def generate_docx(cv_data, output_lang):
 # NAVIGATION HELPERS
 # ============================================================
 
-TAB_NAMES = ["The Job", "CV Content", "Analysis", "Refinement", "Preview", "Export"]
-TAB_ICONS = ["🎯", "📄", "📊", "✏️", "👁️", "⬇️"]
+TAB_NAMES = ["The job", "Your CV", "Match", "Questions", "Review", "Download"]
+TAB_ICONS = ["", "", "", "✏️", "👁️", "⬇️"]
 
 def go_to(tab_index):
     st.session_state.active_tab = tab_index
@@ -2356,149 +2250,51 @@ def go_to(tab_index):
     st.rerun()
 
 LOGO_SVG = """<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="5" y="2" width="18" height="24" rx="2" stroke="#0F172A" stroke-width="1.8" fill="white"/>
-  <line x1="9" y1="9" x2="19" y2="9" stroke="#E5E7EB" stroke-width="1.2"/>
-  <line x1="9" y1="13" x2="19" y2="13" stroke="#E5E7EB" stroke-width="1.2"/>
-  <line x1="9" y1="17" x2="15" y2="17" stroke="#E5E7EB" stroke-width="1.2"/>
-  <circle cx="22" cy="22" r="7" fill="white" stroke="#0F172A" stroke-width="1.8"/>
-  <line x1="22" y1="17" x2="22" y2="22" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
-  <line x1="22" y1="22" x2="25.5" y2="25.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="22" cy="22" r="1.2" fill="#0F172A"/>
+  <rect x="5" y="2" width="18" height="24" rx="2" stroke="#16213A" stroke-width="1.8" fill="white"/>
+  <line x1="9" y1="9" x2="19" y2="9" stroke="#DCE2EC" stroke-width="1.2"/>
+  <line x1="9" y1="13" x2="19" y2="13" stroke="#DCE2EC" stroke-width="1.2"/>
+  <line x1="9" y1="17" x2="15" y2="17" stroke="#DCE2EC" stroke-width="1.2"/>
+  <circle cx="22" cy="22" r="7" fill="white" stroke="#16213A" stroke-width="1.8"/>
+  <line x1="22" y1="17" x2="22" y2="22" stroke="#16213A" stroke-width="2" stroke-linecap="round"/>
+  <line x1="22" y1="22" x2="25.5" y2="25.5" stroke="#16213A" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="22" cy="22" r="1.2" fill="#16213A"/>
 </svg>"""
 
 LOGO_SVG_SM = """<svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="5" y="2" width="18" height="24" rx="2" stroke="#0F172A" stroke-width="1.8" fill="white"/>
-  <circle cx="22" cy="22" r="7" fill="white" stroke="#0F172A" stroke-width="1.8"/>
-  <line x1="22" y1="17" x2="22" y2="22" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
-  <line x1="22" y1="22" x2="25.5" y2="25.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="22" cy="22" r="1.2" fill="#0F172A"/>
+  <rect x="5" y="2" width="18" height="24" rx="2" stroke="#16213A" stroke-width="1.8" fill="white"/>
+  <circle cx="22" cy="22" r="7" fill="white" stroke="#16213A" stroke-width="1.8"/>
+  <line x1="22" y1="17" x2="22" y2="22" stroke="#16213A" stroke-width="2" stroke-linecap="round"/>
+  <line x1="22" y1="22" x2="25.5" y2="25.5" stroke="#16213A" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="22" cy="22" r="1.2" fill="#16213A"/>
 </svg>"""
+
+
+SITE_URL = "https://leenabuleil04-ctrl.github.io/resumepilot/"
 
 
 def render_header():
     st.markdown(f"""
     <div class="rp-header">
-        {LOGO_SVG}
-        <span class="rp-brand">ResumePilot</span>
-        <span class="rp-tagline">Land more interviews.</span>
+        <a class="rp-logo" href="{SITE_URL}" target="_self"><span class="rp-logo-mark"></span><span class="rp-brand">ResumePilot</span></a>
+        <span class="rp-tagline"><a href="{SITE_URL}#how" target="_self">How it works</a></span>
     </div>
     """, unsafe_allow_html=True)
 
 
 def render_step_bar(current):
-    html = '<div class="rp-step-bar">'
+    html = '<nav class="rp-step-bar" aria-label="Progress">'
     for i, name in enumerate(TAB_NAMES):
-        if i < current:
-            dot_cls, name_cls, icon = "rp-dot-done", "rp-name-done", "✓"
-        elif i == current:
-            dot_cls, name_cls, icon = "rp-dot-active", "rp-name-active", str(i+1)
-        else:
-            dot_cls, name_cls, icon = "rp-dot-todo", "rp-name-todo", str(i+1)
-        html += f'<div class="rp-step-item"><div class="rp-step-dot {dot_cls}">{icon}</div><span class="rp-step-name {name_cls}">{_esc(name)}</span></div>'
-        if i < len(TAB_NAMES) - 1:
-            conn = "rp-conn-done" if i < current else "rp-conn-todo"
-            html += f'<div class="rp-connector {conn}"></div>'
-    html += '</div>'
+        state = "done" if i < current else ("active" if i == current else "todo")
+        num = "✓" if i < current else str(i + 1)
+        aria = ' aria-current="step"' if i == current else ""
+        html += f'<div class="rp-step-item {state}"{aria}><div class="rp-step-num">{num}</div><div class="rp-step-name">{_esc(name)}</div></div>'
+    html += '</nav>'
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_landing():
-    """Full ResumePilot landing page shown before user starts."""
-
-    # HERO
-    st.markdown("""
-<div style="background:radial-gradient(ellipse 80% 45% at 50% -10%, #EFF6FF 0%, #F8FAFC 65%);padding-bottom:8px;">
-  <div class="rp-hero">
-    <h1>Turn any CV into a<br><span>job-targeted application.</span></h1>
-    <p>ResumePilot analyzes the job description, finds what your CV is missing, asks targeted questions, and creates a stronger resume without inventing experience.</p>
-  </div>
-</div>
-    """, unsafe_allow_html=True)
-
-    # CTA BUTTON — real Streamlit widget
-    st.markdown("<div style='height:24px;'></div>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([2, 1.2, 2])
-    with col2:
-        if st.button("Start tailoring →", type="primary", use_container_width=True):
-            st.session_state.show_landing = False
-            st.rerun()
-    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
-
-    # BENTO GRID — 6 features
-    st.markdown("""
-<div class="rp-bento">
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">🔍</div>
-    <div class="rp-bento-title">Semantic job matching</div>
-    <div class="rp-bento-desc">We don't just scan for keywords — we understand what the role actually requires and where your CV falls short.</div>
-  </div>
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">🎯</div>
-    <div class="rp-bento-title">Gap detection</div>
-    <div class="rp-bento-desc">Every missing ATS keyword, missing metric, and weak bullet is flagged clearly so you know exactly what to fix.</div>
-  </div>
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">💬</div>
-    <div class="rp-bento-title">Targeted refinement questions</div>
-    <div class="rp-bento-desc">AI generates 5–8 personalized questions based on your actual CV gaps — not generic prompts.</div>
-  </div>
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">✍️</div>
-    <div class="rp-bento-title">Honest AI rewriting</div>
-    <div class="rp-bento-desc">Your CV is rewritten using only what you told us — your real experience, your actual projects, your words.</div>
-  </div>
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">🌐</div>
-    <div class="rp-bento-title">English / Hebrew / Arabic output</div>
-    <div class="rp-bento-desc">Professional localization via Claude — not word-by-word translation. Native phrasing for the Israeli job market.</div>
-  </div>
-  <div class="rp-bento-cell">
-    <div class="rp-bento-icon">📁</div>
-    <div class="rp-bento-title">DOCX export</div>
-    <div class="rp-bento-desc">Download a formatted, recruiter-ready DOCX or TXT file — ready to attach and send immediately.</div>
-  </div>
-</div>
-    """, unsafe_allow_html=True)
-
-    # HOW IT WORKS
-    st.markdown("""
-<div class="rp-how">
-  <div class="rp-how-inner">
-    <div class="rp-how-label">How it works</div>
-    <div class="rp-how-title">From job description to tailored CV in minutes.</div>
-    <div class="rp-how-steps">
-      <div class="rp-how-step">
-        <div class="rp-how-num">1</div>
-        <div class="rp-how-step-title">Paste the job</div>
-        <div class="rp-how-step-desc">Drop in any job description from LinkedIn, a company site, or anywhere else.</div>
-      </div>
-      <div class="rp-how-step">
-        <div class="rp-how-num">2</div>
-        <div class="rp-how-step-title">Upload your CV</div>
-        <div class="rp-how-step-desc">We analyze it, score the match, and pinpoint every gap worth addressing.</div>
-      </div>
-      <div class="rp-how-step">
-        <div class="rp-how-num">3</div>
-        <div class="rp-how-step-title">Download &amp; apply</div>
-        <div class="rp-how-step-desc">Get a tailored resume in English, Hebrew, or Arabic — ready to send.</div>
-      </div>
-    </div>
-  </div>
-</div>
-    """, unsafe_allow_html=True)
-
-    # FOOTER
-    st.markdown("""
-<div class="rp-footer">
-  <div class="rp-footer-brand">ResumePilot</div>
-  <p class="rp-footer-p">AI-powered CV tailoring for the modern job market.</p>
-</div>
-    """, unsafe_allow_html=True)
-
-
-def nav_buttons(current, can_proceed=True, proceed_label="Next →", back_label="← Back"):
-    st.markdown("<div style='margin-top:28px; padding-top:8px; border-top:1px solid #E5E7EB;'></div>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 6, 1])
+def nav_buttons(current, can_proceed=True, proceed_label="Continue", back_label="Back"):
+    st.markdown("<div style='margin-top:36px; padding-top:12px; border-top:1px solid #DCE2EC;'></div>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1.2, 2.6, 2.2])
     with col1:
         if current > 0:
             if st.button(back_label, key=f"back_{current}", use_container_width=True):
@@ -2520,11 +2316,6 @@ def nav_buttons(current, can_proceed=True, proceed_label="Next →", back_label=
 # APP HEADER + LANDING PAGE
 # ============================================================
 
-# Show landing page if not started
-if st.session_state.show_landing:
-    render_landing()
-    st.stop()
-
 # Otherwise show the app
 render_header()
 current_tab = st.session_state.active_tab
@@ -2537,12 +2328,12 @@ st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 # ============================================================
 
 if current_tab == 0:
-    st.markdown('<div class="rp-page-badge">STEP 1 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">Target Position</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Tell us the role you\'re going for. We\'ll use it to match and tailor everything.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 1 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">Which job are you applying for?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-sub">Paste the job ad. Everything that follows is tailored to it.</div>', unsafe_allow_html=True)
 
     job_role_input = st.text_input(
-        "Target Job Title",
+        "Job title",
         value=st.session_state.job_role,
         placeholder="e.g., Data Analyst Intern, Software Engineer, Marketing Associate",
         key="job_role_input"
@@ -2550,7 +2341,7 @@ if current_tab == 0:
     st.session_state.job_role = job_role_input
 
     st.session_state.job_desc = st.text_area(
-        "Job Description",
+        "Job ad",
         value=st.session_state.job_desc,
         height=280,
         placeholder="Paste the full job description here — include responsibilities, requirements, and qualifications..."
@@ -2585,12 +2376,12 @@ Requirements:
     if st.session_state.job_desc.strip():
         is_valid, err = validate_job_description(st.session_state.job_desc)
         if not is_valid:
-            st.error(f"⚠️ {err}")
+            st.error(f"{err}")
             job_ready = False
         else:
             st.markdown('<div class="alert-box alert-green">✓ Job description looks good.</div>', unsafe_allow_html=True)
 
-    nav_buttons(0, can_proceed=job_ready, proceed_label="Next →")
+    nav_buttons(0, can_proceed=job_ready, proceed_label="Continue")
 
 
 # ============================================================
@@ -2598,16 +2389,17 @@ Requirements:
 # ============================================================
 
 elif current_tab == 1:
-    st.markdown('<div class="rp-page-badge">STEP 2 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">CV Content</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Upload or paste your resume in English. Hebrew and Arabic output available in Preview.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 2 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">Add your CV</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-sub">Upload a PDF or Word file, or paste the text. English, Hebrew or Arabic is fine.</div>', unsafe_allow_html=True)
 
     # English-only notice
-    st.info("Please enter your CV in English. You can choose Hebrew or Arabic output in the Preview tab.")
 
     method = st.radio(
-        "How would you like to provide your CV?",
+        "How do you want to add it?",
         ["Upload File (PDF/DOCX/TXT)", "Paste Text", "Manual Entry"],
+        format_func=lambda v: {"Upload File (PDF/DOCX/TXT)": "Upload a file", "Paste Text": "Paste the text",
+                               "Manual Entry": "Type it in"}.get(v, v),
         horizontal=True,
         key="cv_method_radio"
     )
@@ -2631,20 +2423,20 @@ elif current_tab == 1:
                 # Detect if uploaded CV is in Hebrew or Arabic
                 detected_lang = detect_language(text)
                 if detected_lang in ["Hebrew", "Arabic"]:
-                    st.info(f"🌐 Your CV is in **{detected_lang}** — that's fine. We'll read it as is. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
+                    st.info(f"Your CV is in **{detected_lang}** — that's fine. We'll read it as is. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
 
                 st.session_state.cv_full_text = text
                 st.session_state.manual_cv_data = classify_sections_refined(text)
                 st.session_state.cv_uploaded = True
-                st.success(f"✅ CV uploaded and parsed! ({len(text.split())} words detected)")
+                st.success(f"CV uploaded and parsed! ({len(text.split())} words detected)")
 
-                with st.expander("👀 Preview detected sections"):
+                with st.expander("Preview detected sections"):
                     for k, v in st.session_state.manual_cv_data.items():
                         if v.strip():
                             st.markdown(f"**{k.replace('_',' ').title()}**")
                             st.text(v[:300] + ("..." if len(v) > 300 else ""))
             else:
-                st.error("❌ Could not extract text from this file. Try copy-pasting instead.")
+                st.error("Could not extract text from this file. Try copy-pasting instead.")
 
     # ---- PASTE TEXT ----
     elif method == "Paste Text":
@@ -2659,14 +2451,14 @@ elif current_tab == 1:
         if pasted.strip():
             detected_lang = detect_language(pasted)
             if detected_lang in ["Hebrew", "Arabic"]:
-                st.info(f"🌐 Your CV is in **{detected_lang}** — that's fine. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
+                st.info(f"Your CV is in **{detected_lang}** — that's fine. You can choose English, Hebrew or Arabic for the final CV in the Preview step.")
 
-        if st.button("🔍 Auto-Structure Text", type="primary"):
+        if st.button("Split into sections", type="primary"):
             if pasted.strip():
                 st.session_state.manual_cv_data = classify_sections_refined(pasted)
                 st.session_state.cv_uploaded = True
-                st.success("✅ Text structured into sections!")
-                with st.expander("👀 Preview detected sections"):
+                st.success("Text structured into sections!")
+                with st.expander("Preview detected sections"):
                     for k, v in st.session_state.manual_cv_data.items():
                         if v.strip():
                             st.markdown(f"**{k.replace('_',' ').title()}**")
@@ -2683,19 +2475,19 @@ elif current_tab == 1:
         fields = [
             ("personal_details", "👤 Full Name & Contact Info",
              "Your Full Name\nyour.email@example.com | +000-000-0000 | City, Country | linkedin.com/in/yourprofile"),
-            ("summary",          "💡 Professional Summary",
+            ("summary",          "Professional Summary",
              "e.g., Final-year Computer Science student with experience in data analysis and software development. Passionate about turning data into actionable insights."),
             ("education",        "🎓 Education",
              "e.g., University Name\nBSc in Your Major\n2022–2025 | GPA: 3.8"),
-            ("experience",       "💼 Work Experience",
+            ("experience",       "Work Experience",
              "e.g., Job Title – Company Name\nMonth Year – Month Year\n- What you did and achieved\n- Another responsibility or result"),
-            ("projects",         "🚀 Projects",
+            ("projects",         "Projects",
              "e.g., Project Name – Brief description\n- Tools used: Python, SQL, etc.\n- What problem it solved or result it produced"),
             ("skills",           "🛠️ Skills",
              "e.g., Python, SQL, Excel, Git, Data Analysis, Communication, Problem Solving, Teamwork"),
             ("courses_training", "📚 Courses & Certifications",
              "e.g., Google Data Analytics Certificate (Coursera, 2024)\nAdvanced Excel for Data Analysis (LinkedIn Learning)"),
-            ("languages",        "🌐 Languages",
+            ("languages",        "Languages",
              "e.g., English (Native), Arabic (Fluent), French (Intermediate)"),
             ("volunteering",     "🤝 Volunteering & Activities",
              "e.g., Volunteer Tutor – Local NGO | 2023–Present\n- Helped 20+ students with math and science\nUniversity Student Council – Events Coordinator"),
@@ -2721,10 +2513,10 @@ elif current_tab == 1:
     if method == "Paste Text":
         pasted_text = st.session_state.cv_full_text.strip()
         if not pasted_text:
-            st.error("⚠️ Please paste your CV text before continuing.")
+            st.error("Please paste your CV text before continuing.")
             cv_ready = False
         elif len(pasted_text) < 50:
-            st.error(f"⚠️ CV text is too short ({len(pasted_text)} characters). Please paste your full resume — minimum 50 characters.")
+            st.error(f"CV text is too short ({len(pasted_text)} characters). Please paste your full resume — minimum 50 characters.")
             cv_ready = False
         else:
             cv_ready = True
@@ -2733,7 +2525,7 @@ elif current_tab == 1:
             st.session_state.cv_full_text.strip() or
             any(v.strip() for v in st.session_state.manual_cv_data.values())
         )
-    nav_buttons(1, can_proceed=cv_ready, proceed_label="Next →")
+    nav_buttons(1, can_proceed=cv_ready, proceed_label="Continue")
 
 
 # ============================================================
@@ -2741,9 +2533,9 @@ elif current_tab == 1:
 # ============================================================
 
 elif current_tab == 2:
-    st.markdown('<div class="rp-page-badge">STEP 3 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">Match Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Deep AI analysis of your CV against this role — strengths, gaps, ATS keywords, and quick wins.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 3 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">How well you match</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-sub">What already fits the job, what is missing, and what a recruiter will look for.</div>', unsafe_allow_html=True)
 
     cv_text = st.session_state.cv_full_text or "\n".join(st.session_state.manual_cv_data.values())
     job_ok  = bool(st.session_state.job_desc.strip())
@@ -2755,7 +2547,7 @@ elif current_tab == 2:
     else:
         is_valid, err = validate_job_description(st.session_state.job_desc)
         if not is_valid:
-            st.error(f"⚠️ {err}")
+            st.error(f"{err}")
             nav_buttons(2, can_proceed=False)
         else:
             # ── Parse CV into sections ──
@@ -2793,9 +2585,9 @@ elif current_tab == 2:
                         "quick_wins":             [f"Add {g['label']} to your CV" for g in rule["missing"][:3]],
                     }
                     if get_anthropic_api_key() is None:
-                        st.error("⚠️ **ANTHROPIC_API_KEY not found.** Add it to `.streamlit/secrets.toml` to enable AI analysis. Showing rule-based results.")
+                        st.error("**ANTHROPIC_API_KEY not found.** Add it to `.streamlit/secrets.toml` to enable AI analysis. Showing rule-based results.")
                     else:
-                        st.warning("⚠️ AI analysis failed (API error). Showing rule-based results.")
+                        st.warning("AI analysis failed (API error). Showing rule-based results.")
 
             # Persist to analysis_results for downstream tabs
             ai = st.session_state.ai_cv_analysis
@@ -2807,98 +2599,8 @@ elif current_tab == 2:
             st.session_state.analysis_done = True
 
             score = ai.get("match_score", 0)
-            score_color = "#16a34a" if score >= 70 else "#ea580c" if score >= 45 else "#dc2626"
-
-            # ── Score Card ──
-            st.markdown(f"""
-            <div class="content-card" style="text-align:center; padding:2rem;">
-                <div style="font-size:5rem;font-weight:900;color:{score_color};line-height:1;">{score}%</div>
-                <div style="font-size:1.3rem;font-weight:700;color:{score_color};margin:8px 0;">{ai.get("match_label","")}</div>
-                <div style="color:#64748b;font-size:0.95rem;max-width:520px;margin:0 auto;line-height:1.6;">
-                    {ai.get("score_rationale","")}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-
-            # ── Strengths and Weaknesses ──
-            col_s, col_w = st.columns(2)
-            strengths  = ai.get("cv_strengths", [])
-            weaknesses = ai.get("cv_weaknesses", [])
-
-            with col_s:
-                st.markdown("""<div style="background:#f0fdf4;border:1px solid #bbf7d0;
-                    border-radius:12px;padding:1.2rem;">
-                    <div style="font-weight:700;color:#16a34a;font-size:1rem;margin-bottom:0.8rem;">
-                    ✅ CV Strengths</div>""", unsafe_allow_html=True)
-                if strengths:
-                    for s in strengths:
-                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#166534;">✓ {_esc(s)}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="color:#6b7280;font-size:0.85rem;">No clear strengths identified for this role.</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            with col_w:
-                st.markdown("""<div style="background:#fff1f2;border:1px solid #fecdd3;
-                    border-radius:12px;padding:1.2rem;">
-                    <div style="font-weight:700;color:#be123c;font-size:1rem;margin-bottom:0.8rem;">
-                    ⚠️ Gaps to Address</div>""", unsafe_allow_html=True)
-                if weaknesses:
-                    for w in weaknesses:
-                        st.markdown(f'<div style="margin-bottom:6px;font-size:0.88rem;color:#9f1239;">✗ {_esc(w)}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="color:#16a34a;font-size:0.85rem;font-weight:600;">🎉 No major gaps!</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-
-            # ── ATS Keywords ──
-            ats_missing  = ai.get("ats_keywords_missing", [])
-            ats_present  = ai.get("ats_keywords_present", [])
-            metrics_miss = ai.get("metrics_missing", [])
-
-            st.markdown("**🔍 ATS Keyword Analysis**")
-            col_ap, col_am = st.columns(2)
-            with col_ap:
-                if ats_present:
-                    st.markdown('<div style="background:#f0fdf4;border-radius:10px;padding:1rem;border:1px solid #bbf7d0;">', unsafe_allow_html=True)
-                    st.markdown('<div style="font-weight:700;color:#16a34a;font-size:0.9rem;margin-bottom:0.5rem;">✅ Keywords Present</div>', unsafe_allow_html=True)
-                    chips = " ".join(
-                        f'<span style="display:inline-block;background:#dcfce7;color:#166534;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
-                        for k in ats_present[:12]
-                    )
-                    st.markdown(chips, unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-            with col_am:
-                if ats_missing:
-                    st.markdown('<div style="background:#fff1f2;border-radius:10px;padding:1rem;border:1px solid #fecdd3;">', unsafe_allow_html=True)
-                    st.markdown('<div style="font-weight:700;color:#be123c;font-size:0.9rem;margin-bottom:0.5rem;">❌ Keywords Missing</div>', unsafe_allow_html=True)
-                    chips = " ".join(
-                        f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
-                        for k in ats_missing[:12]
-                    )
-                    st.markdown(chips, unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-            # ── Bullets needing metrics ──
-            if metrics_miss:
-                st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-                st.markdown("**📊 Bullets That Need Metrics (add numbers = more impact)**")
-                for m in metrics_miss:
-                    st.markdown(f'<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#78350f;">{_esc(m)}</div>', unsafe_allow_html=True)
-
-            # ── Quick Wins ──
-            quick_wins = ai.get("quick_wins", [])
-            if quick_wins:
-                st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-                st.markdown("**⚡ Quick Wins — biggest impact improvements**")
-                for i, qw in enumerate(quick_wins, 1):
-                    st.markdown(f'<div style="background:#f0f9ff;border-left:3px solid #0ea5e9;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:0.88rem;color:#0c4a6e;">{i}. {_esc(qw)}</div>', unsafe_allow_html=True)
-
-            st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-            nav_buttons(2, can_proceed=True, proceed_label="Next: Refine CV →")
+            st.markdown(render_match_report(ai, score), unsafe_allow_html=True)
+            nav_buttons(2, can_proceed=True, proceed_label="Continue to questions")
 
 
 # ============================================================
@@ -2906,9 +2608,9 @@ elif current_tab == 2:
 # ============================================================
 
 elif current_tab == 3:
-    st.markdown('<div class="rp-page-badge">STEP 4 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">Refine Your CV</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Answer these personalized questions to unlock a stronger, more specific CV rewrite.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 4 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">A few quick questions</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-sub">Your answers add the real numbers and results your CV is missing. Skip any you don\'t know.</div>', unsafe_allow_html=True)
 
     if not st.session_state.analysis_done:
         st.info("ℹ️ Please complete the Analysis step first.")
@@ -2918,15 +2620,15 @@ elif current_tab == 3:
         tier  = get_match_tier(score)
 
         if tier == "high":
-            st.success(f"🎉 Your CV scores **{score}%** — strong match. Answer below to make it even sharper.")
+            st.success(f"Your CV scores **{score}%** — strong match. Answer below to make it even sharper.")
         elif tier == "medium":
             st.warning(f"Your CV scores **{score}%** — partial match. Answer honestly below. Only real experience will be used in the rewrite.")
         else:
             # Low match — skip the refinement questions entirely
             st.markdown(f"""
-            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:1.4rem 1.6rem;margin-bottom:1.2rem;">
-                <div style="font-size:1.05rem;font-weight:700;color:#be123c;margin-bottom:8px;">⚠️ Low Match — {score}%</div>
-                <div style="font-size:0.92rem;color:#7f1d1d;line-height:1.65;">
+            <div style="background:#FBE9EC;border:1px solid #F5C6CE;border-radius:12px;padding:1.4rem 1.6rem;margin-bottom:1.2rem;">
+                <div style="font-size:1.05rem;font-weight:700;color:#B4233A;margin-bottom:8px;">Low Match — {score}%</div>
+                <div style="font-size:0.92rem;color:#B4233A;line-height:1.65;">
                     Your CV doesn't overlap enough with this role for honest tailoring.<br>
                     Rewriting it to "fit" would mean exaggerating or fabricating experience — which ResumePilot won't do.<br><br>
                     <strong>Instead, the next step will show you a career development roadmap:</strong> what skills are missing,
@@ -2939,13 +2641,13 @@ elif current_tab == 3:
             better_roles = st.session_state.ai_cv_analysis.get("quick_wins", [])
             if ats_missing:
                 chips = " ".join(
-                    f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
+                    f'<span style="display:inline-block;background:#FBE9EC;color:#B4233A;padding:3px 10px;'
                     f'border-radius:9999px;font-size:0.8rem;margin:2px;">{_esc(k)}</span>'
                     for k in ats_missing[:10]
                 )
-                st.markdown(f'<div style="margin-bottom:12px;"><strong style="font-size:0.85rem;color:#64748b;">Skills gap at a glance:</strong><br>{chips}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="margin-bottom:12px;"><strong style="font-size:0.85rem;color:#5A6478;">Skills gap at a glance:</strong><br>{chips}</div>', unsafe_allow_html=True)
 
-            nav_buttons(3, can_proceed=True, proceed_label="Next: See Career Roadmap →")
+            nav_buttons(3, can_proceed=True, proceed_label="See your plan")
             st.stop()
 
         st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
@@ -2986,15 +2688,14 @@ elif current_tab == 3:
                     ]
                 st.session_state.dynamic_questions = fallback_qs
                 if get_anthropic_api_key() is None:
-                    st.error("⚠️ **ANTHROPIC_API_KEY not found.** Showing fallback questions. Add your key to enable personalized AI questions.")
+                    st.error("**ANTHROPIC_API_KEY not found.** Showing fallback questions. Add your key to enable personalized AI questions.")
                 else:
                     err_detail = st.session_state.get('_last_api_error', 'unknown error')
-                    st.warning(f"⚠️ Could not generate personalized questions ({err_detail}). Showing standard questions.")
+                    st.warning(f"Could not generate personalized questions ({err_detail}). Showing standard questions.")
 
         # ── Render questions (Step 4: store all answers in structured memory) ──
         questions = st.session_state.dynamic_questions
-        st.markdown(f"**Answer these {len(questions)} questions** — your answers are saved automatically and used to rewrite your CV:")
-        st.markdown("")
+        st.markdown(f'<p style="font-size:17px;color:#5A6478;margin:0 0 20px">{len(questions)} questions. Your answers are saved as you type.</p>', unsafe_allow_html=True)
 
         for q in questions:
             key    = q.get("key", "q_unknown")
@@ -3004,11 +2705,11 @@ elif current_tab == 3:
             gap    = q.get("gap_addressed", "")
 
             # Show section badge if available
-            badge = f'<span style="font-size:0.72rem;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:9999px;font-weight:600;margin-left:6px;text-transform:uppercase;">{_esc(section)}</span>' if section else ""
+            badge = ""
             text_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', _esc(text))
-            st.markdown(f'<div style="font-weight:700;font-size:0.95rem;color:#1e293b;margin-bottom:4px;">{text_html}{badge}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font:700 19px/1.35 var(--display);color:#16213A;margin:8px 0 6px;">{text_html}{badge}</div>', unsafe_allow_html=True)
             if gap:
-                st.markdown(f'<div style="font-size:0.78rem;color:#64748b;margin-bottom:6px;">Why we ask: {_esc(gap)}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="rp-why" style="margin-bottom:10px"><b>Why we ask</b>{_esc(gap)}</div>', unsafe_allow_html=True)
 
             # Retrieve prior answer (supports both old string format and new dict format)
             prior = st.session_state.follow_up_answers.get(key, "")
@@ -3035,13 +2736,10 @@ elif current_tab == 3:
             st.markdown("")
 
         st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
-        st.markdown('<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:1rem;font-size:0.88rem;color:#0369a1;">'
-                    '💡 <strong>Tip:</strong> Skip any question that doesn\'t apply — write "N/A" or leave it blank. '
-                    'The AI rewriter will only use the answers you provide. It will never invent information you didn\'t give.'
-                    '</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rp-tip">Leave a question blank if it doesn\'t apply. Your new CV only uses what you write here and what is already in your CV.</div>', unsafe_allow_html=True)
 
         st.markdown("")
-        nav_buttons(3, can_proceed=True, proceed_label="Next: Preview CV →")
+        nav_buttons(3, can_proceed=True, proceed_label="Write my new CV")
 
 
 # ============================================================
@@ -3049,9 +2747,9 @@ elif current_tab == 3:
 # ============================================================
 
 elif current_tab == 4:
-    st.markdown('<div class="rp-page-badge">STEP 5 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">Preview</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-sub">Your professionally rewritten, ATS-optimized resume. Review before downloading.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 5 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">Review your new CV</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-sub">Every change is marked. Keep it, undo it, or edit it before you download.</div>', unsafe_allow_html=True)
 
     lang = st.radio("Output language:", ["English","Hebrew","Arabic"], horizontal=True, key="lang_select")
     if lang == "Hebrew":
@@ -3080,7 +2778,7 @@ elif current_tab == 4:
     has_content = any(v.strip() for v in base_data.values())
 
     if not has_content:
-        st.warning("⚠️ No CV content found. Please go back to **CV Content** and add your information.")
+        st.warning("No CV content found. Please go back to **CV Content** and add your information.")
         nav_buttons(4, can_proceed=False)
     else:
         score = st.session_state.analysis_results.get("score", 0)
@@ -3092,7 +2790,7 @@ elif current_tab == 4:
         if tier == "low":
             st.markdown(f"""
             <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:1.2rem 1.6rem;margin-bottom:1.4rem;">
-                <div style="font-size:1rem;font-weight:700;color:#c2410c;margin-bottom:6px;">📊 Match Score: {score}% — Career Gap Analysis Mode</div>
+                <div style="font-size:1rem;font-weight:700;color:#c2410c;margin-bottom:6px;">Match Score: {score}% — Career Gap Analysis Mode</div>
                 <div style="font-size:0.9rem;color:#7c2d12;line-height:1.6;">
                     This CV doesn't match the role well enough for tailoring without exaggerating your background.
                     Below is an honest breakdown of what's missing and a concrete roadmap to close the gap.
@@ -3102,7 +2800,7 @@ elif current_tab == 4:
 
             # Generate career recommendations (once per session)
             if not st.session_state.career_recommendations:
-                with st.spinner("🔍 Analyzing gaps and building your career roadmap... (~15 seconds)"):
+                with st.spinner("Analyzing gaps and building your career roadmap... (~15 seconds)"):
                     recs = call_claude_career_recommendations(
                         base_data,
                         st.session_state.job_role,
@@ -3113,7 +2811,7 @@ elif current_tab == 4:
                     st.session_state.career_recommendations = recs
                 else:
                     st.session_state.career_recommendations = {"_fallback": True}
-                    st.warning("⚠️ Could not generate AI recommendations. Showing gap analysis from the Analysis tab.")
+                    st.warning("Could not generate AI recommendations. Showing gap analysis from the Analysis tab.")
 
             recs = st.session_state.career_recommendations
 
@@ -3122,15 +2820,15 @@ elif current_tab == 4:
                 if recs.get("why_low_match"):
                     st.markdown(f"""
                     <div style="background:#fef2f2;border-left:4px solid #ef4444;border-radius:0 10px 10px 0;
-                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#7f1d1d;line-height:1.6;">
+                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#B4233A;line-height:1.6;">
                         <strong>Why the low match:</strong> {recs['why_low_match']}
                     </div>""", unsafe_allow_html=True)
 
                 # ── What is strong ──
                 if recs.get("what_is_strong"):
                     st.markdown(f"""
-                    <div style="background:#f0fdf4;border-left:4px solid #22c55e;border-radius:0 10px 10px 0;
-                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#14532d;line-height:1.6;">
+                    <div style="background:#EAF6F1;border-left:4px solid #22c55e;border-radius:0 10px 10px 0;
+                        padding:12px 16px;margin-bottom:1rem;font-size:0.9rem;color:#0B7A5C;line-height:1.6;">
                         <strong>What you do have:</strong> {recs['what_is_strong']}
                     </div>""", unsafe_allow_html=True)
 
@@ -3164,11 +2862,11 @@ elif current_tab == 4:
                     for p in projects:
                         skills_str = " · ".join(p.get("skills_gained", []))
                         st.markdown(f"""
-                        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
+                        <div style="background:#EEF1FB;border:1px solid #D5DCF5;border-radius:10px;
                             padding:12px 16px;margin-bottom:8px;">
-                            <div style="font-weight:700;font-size:0.92rem;color:#0c4a6e;">{p.get('title','')}</div>
-                            <div style="font-size:0.85rem;color:#0369a1;margin:4px 0;">{p.get('description','')}</div>
-                            <div style="font-size:0.78rem;color:#64748b;">
+                            <div style="font-weight:700;font-size:0.92rem;color:#16213A;">{p.get('title','')}</div>
+                            <div style="font-size:0.85rem;color:#2A3FD6;margin:4px 0;">{p.get('description','')}</div>
+                            <div style="font-size:0.78rem;color:#5A6478;">
                                 Skills: {skills_str} &nbsp;·&nbsp; {p.get('difficulty','')} &nbsp;·&nbsp; {p.get('estimated_time','')}
                             </div>
                         </div>""", unsafe_allow_html=True)
@@ -3178,14 +2876,14 @@ elif current_tab == 4:
                 if courses:
                     st.markdown("**📚 Courses to take**")
                     for c in courses:
-                        free_badge = '<span style="background:#dcfce7;color:#166534;padding:1px 7px;border-radius:9999px;font-size:0.75rem;font-weight:600;margin-left:6px;">FREE</span>' if c.get("free") else ""
+                        free_badge = '<span style="background:#EAF6F1;color:#0B7A5C;padding:1px 7px;border-radius:9999px;font-size:0.75rem;font-weight:600;margin-left:6px;">FREE</span>' if c.get("free") else ""
                         skills_str = " · ".join(c.get("skills_gained", []))
                         st.markdown(f"""
-                        <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;
+                        <div style="background:#F6F8FB;border:1px solid #DCE2EC;border-radius:8px;
                             padding:10px 14px;margin-bottom:6px;font-size:0.87rem;">
                             <strong>{c.get('name','')}</strong>{free_badge}
-                            <span style="color:#64748b;margin-left:8px;">{c.get('platform','')}</span>
-                            <div style="color:#64748b;font-size:0.8rem;margin-top:2px;">Covers: {skills_str}</div>
+                            <span style="color:#5A6478;margin-left:8px;">{c.get('platform','')}</span>
+                            <div style="color:#5A6478;font-size:0.8rem;margin-top:2px;">Covers: {skills_str}</div>
                         </div>""", unsafe_allow_html=True)
 
                 # ── Certifications ──
@@ -3194,10 +2892,10 @@ elif current_tab == 4:
                     st.markdown("**🏅 Certifications worth getting**")
                     for cert in certs:
                         st.markdown(f"""
-                        <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;
+                        <div style="background:#F6F8FB;border:1px solid #DCE2EC;border-radius:8px;
                             padding:10px 14px;margin-bottom:6px;font-size:0.87rem;">
                             <strong>{cert.get('name','')}</strong>
-                            <div style="color:#64748b;font-size:0.8rem;margin-top:2px;">{cert.get('why_relevant','')}</div>
+                            <div style="color:#5A6478;font-size:0.8rem;margin-top:2px;">{cert.get('why_relevant','')}</div>
                         </div>""", unsafe_allow_html=True)
 
                 # ── Timeline + better fit roles ──
@@ -3205,9 +2903,9 @@ elif current_tab == 4:
                 with col_t:
                     if recs.get("realistic_timeline"):
                         st.markdown(f"""
-                        <div style="background:#f1f5f9;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
+                        <div style="background:#F6F8FB;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
                             <strong>⏱️ Realistic timeline</strong><br>
-                            <span style="color:#475569;">{recs['realistic_timeline']}</span>
+                            <span style="color:#5A6478;">{recs['realistic_timeline']}</span>
                         </div>""", unsafe_allow_html=True)
                 with col_r:
                     better_roles = recs.get("better_fit_roles", [])
@@ -3218,16 +2916,16 @@ elif current_tab == 4:
                             for r in better_roles
                         )
                         st.markdown(f"""
-                        <div style="background:#f1f5f9;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
-                            <strong>✅ Better-fit roles right now</strong><br><br>{roles_html}
+                        <div style="background:#F6F8FB;border-radius:10px;padding:12px 16px;font-size:0.88rem;">
+                            <strong>Better-fit roles right now</strong><br><br>{roles_html}
                         </div>""", unsafe_allow_html=True)
 
             st.markdown("<div style='margin-bottom:1.4rem;'></div>", unsafe_allow_html=True)
 
             # ── Re-run button ──
-            col_regen, _ = st.columns([1, 4])
+            col_regen, _ = st.columns([2, 3])
             with col_regen:
-                if st.button("🔄 Re-generate Roadmap"):
+                if st.button("Write the plan again"):
                     st.session_state.career_recommendations = {}
                     st.rerun()
 
@@ -3242,13 +2940,13 @@ elif current_tab == 4:
                 cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}_{content_id}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
-                    with st.spinner(f"🌐 Formatting CV in {'Hebrew' if lang == 'Hebrew' else 'Arabic'}..."):
+                    with st.spinner(f"Formatting CV in {'Hebrew' if lang == 'Hebrew' else 'Arabic'}..."):
                         localized = call_claude_localize_cv(base_data, lang, st.session_state.get("hebrew_form", "neutral"))
                     if localized:
                         st.session_state[cache_key] = localized
                         display_cv = localized
                     else:
-                        st.warning(f"⚠️ Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
+                        st.warning(f"Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
                         display_cv = base_data
                 else:
                     display_cv = cached
@@ -3257,11 +2955,11 @@ elif current_tab == 4:
 
             st.session_state.final_cv_data = display_cv
 
-            st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;margin-top:12px;">', unsafe_allow_html=True)
+            st.markdown('<div style="background:#F6F8FB;padding:30px 15px;border-radius:12px;margin-top:12px;">', unsafe_allow_html=True)
             st.markdown(render_cv_html(display_cv, lang), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            nav_buttons(4, can_proceed=True, proceed_label="Next: Download →")
+            nav_buttons(4, can_proceed=True, proceed_label="Continue to download")
 
         # ══════════════════════════════════════════════════════════
         # MEDIUM or HIGH MATCH — CV Rewrite (honest for medium)
@@ -3270,9 +2968,9 @@ elif current_tab == 4:
             # ── Steps 5-10: Full CV Rewrite (English, run once per session) ──
             if not st.session_state.cv_adjusted:
                 spinner_msg = (
-                    "✨ Rewriting your CV for this role... (~20 seconds)"
+                    "Rewriting your CV for this role... (~20 seconds)"
                     if tier == "high"
-                    else "✨ Tailoring the matching parts of your CV honestly... (~20 seconds)"
+                    else "Tailoring the matching parts of your CV honestly... (~20 seconds)"
                 )
                 with st.spinner(spinner_msg):
                     rewrite_result = call_claude_rewrite_cv(
@@ -3308,15 +3006,15 @@ elif current_tab == 4:
                     st.session_state.improvement_log = []
                     if get_anthropic_api_key() is None:
                         st.error(
-                            "⚠️ **ANTHROPIC_API_KEY not found.** "
+                            "**ANTHROPIC_API_KEY not found.** "
                             "Add it to `.streamlit/secrets.toml` as `ANTHROPIC_API_KEY = \"sk-ant-...\"` "
                             "to enable AI rewriting. Showing your original CV for now."
                         )
                     else:
-                        st.warning("⚠️ AI rewrite failed (API error). Showing your original CV.")
+                        st.warning("AI rewrite failed (API error). Showing your original CV.")
 
             for note in st.session_state.get("fact_check_notes", []):
-                st.info("🛡️ " + note)
+                st.info(note)
 
             english_cv = render_change_review(base_data, st.session_state.get("ai_sections", {}),
                                               st.session_state.improvement_log)
@@ -3327,7 +3025,7 @@ elif current_tab == 4:
                 missing_skills = st.session_state.ai_cv_analysis.get("ats_keywords_missing", [])
                 if missing_skills:
                     chips = " ".join(
-                        f'<span style="display:inline-block;background:#ffe4e6;color:#9f1239;padding:3px 10px;'
+                        f'<span style="display:inline-block;background:#FBE9EC;color:#B4233A;padding:3px 10px;'
                         f'border-radius:9999px;font-size:0.78rem;margin:2px;">{_esc(k)}</span>'
                         for k in missing_skills[:10]
                     )
@@ -3335,7 +3033,7 @@ elif current_tab == 4:
                     <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;
                         padding:12px 16px;margin-bottom:1rem;">
                         <div style="font-weight:700;font-size:0.9rem;color:#c2410c;margin-bottom:6px;">
-                            ⚠️ Partial match ({score}%) — only real overlaps were tailored
+                            Partial match ({score}%) — only real overlaps were tailored
                         </div>
                         <div style="font-size:0.82rem;color:#78350f;margin-bottom:8px;">
                             These skills are required by the job but absent from your CV.
@@ -3350,13 +3048,13 @@ elif current_tab == 4:
                 cache_key = f"translated_{lang}_{st.session_state.get('hebrew_form', 'neutral') if lang == 'Hebrew' else ''}_{content_id}"
                 cached = st.session_state.get(cache_key, {})
                 if not cached:
-                    with st.spinner(f"🌐 Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
+                    with st.spinner(f"Localizing CV to {'Hebrew' if lang == 'Hebrew' else 'Arabic'}... (~15 seconds)"):
                         localized = call_claude_localize_cv(english_cv, lang, st.session_state.get("hebrew_form", "neutral"))
                     if localized:
                         st.session_state[cache_key] = localized
                         final_cv = localized
                     else:
-                        st.warning(f"⚠️ Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
+                        st.warning(f"Couldn't translate to {lang} right now. Showing the English version — try again in a minute.")
                         final_cv = english_cv
                 else:
                     final_cv = cached
@@ -3366,9 +3064,9 @@ elif current_tab == 4:
             st.session_state.final_cv_data = final_cv
 
             # ── Regenerate button ──
-            col_regen, _ = st.columns([1, 4])
+            col_regen, _ = st.columns([2, 3])
             with col_regen:
-                if st.button("🔄 Re-generate CV"):
+                if st.button("Rewrite my CV again"):
                     st.session_state.cv_adjusted = False
                     st.session_state.adjusted_cv_data = {}
                     st.session_state.final_cv_data = {}
@@ -3382,14 +3080,14 @@ elif current_tab == 4:
             st.markdown("<div style='margin-bottom:24px;'></div>", unsafe_allow_html=True)
 
             # ── CV Preview ──
-            st.markdown('<div style="background:#f1f5f9;padding:30px 15px;border-radius:12px;">', unsafe_allow_html=True)
+            st.markdown('<div style="background:#F6F8FB;padding:30px 15px;border-radius:12px;">', unsafe_allow_html=True)
             st.markdown(render_cv_html(final_cv, lang), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            ready_msg = "✅ **Your tailored CV is ready!**" if tier == "high" else "✅ **Your CV is ready** — only genuine overlaps with the job were strengthened."
-            st.markdown(f'<div style="margin-top:1rem;padding:1rem;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;">{ready_msg} Download it in the next tab.</div>', unsafe_allow_html=True)
+            ready_msg = "**Your tailored CV is ready!**" if tier == "high" else "**Your CV is ready** — only genuine overlaps with the job were strengthened."
+            st.markdown(f'<div style="margin-top:1rem;padding:1rem;background:#EAF6F1;border-radius:10px;border:1px solid #BFE3D5;">{ready_msg} Download it in the next tab.</div>', unsafe_allow_html=True)
 
-            nav_buttons(4, can_proceed=True, proceed_label="Next: Download →")
+            nav_buttons(4, can_proceed=True, proceed_label="Continue to download")
 
 
 # ============================================================
@@ -3397,8 +3095,8 @@ elif current_tab == 4:
 # ============================================================
 
 elif current_tab == 5:
-    st.markdown('<div class="rp-page-badge">STEP 6 OF 6</div>', unsafe_allow_html=True)
-    st.markdown('<div class="rp-page-title">Download</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-badge">Step 6 of 6</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rp-page-title">Download your CV</div>', unsafe_allow_html=True)
     _export_score = st.session_state.analysis_results.get("score", 0)
     _export_sub = (
         "Your tailored CV is ready to send."
@@ -3429,9 +3127,9 @@ elif current_tab == 5:
             st.markdown("""
             <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;
                 padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#7c2d12;line-height:1.65;">
-                ⚠️ <strong>Heads up:</strong> Your CV didn't match this role well enough for tailoring.
+                <strong>Heads up:</strong> Your CV didn't match this role well enough for tailoring.
                 What you're downloading is your <strong>original CV with clean formatting applied</strong> — the content was not rewritten to fit this job.<br><br>
-                Go back to the <strong>Preview</strong> tab to see your career roadmap and the skills you need to build before applying to this role.
+                Go back to the <strong>Review your new CV</strong> tab to see your career roadmap and the skills you need to build before applying to this role.
             </div>
             """, unsafe_allow_html=True)
         elif tier == "medium":
@@ -3446,9 +3144,9 @@ elif current_tab == 5:
             """, unsafe_allow_html=True)
         else:
             st.markdown("""
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;
-                padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#14532d;line-height:1.65;">
-                ✅ <strong>Strong match:</strong> Your CV has been fully tailored for this role. Review every line before sending.
+            <div style="background:#EAF6F1;border:1px solid #BFE3D5;border-radius:10px;
+                padding:14px 18px;margin-bottom:16px;font-size:0.9rem;color:#0B7A5C;line-height:1.65;">
+                <strong>Strong match:</strong> Your CV has been fully tailored for this role. Review every line before sending.
             </div>
             """, unsafe_allow_html=True)
 
@@ -3466,7 +3164,7 @@ elif current_tab == 5:
             st.markdown('<div class="rp-dl-fmt">DOCX</div><div class="rp-dl-desc">Recommended — send directly to employers</div>', unsafe_allow_html=True)
             docx_buf = generate_docx(cv_f, active_lang)
             st.download_button(
-                "📁 Download DOCX",
+                "Download DOCX",
                 docx_buf,
                 file_name=f"{f_name}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -3497,7 +3195,7 @@ elif current_tab == 5:
                     v = re.sub(r'\s*•\s*', '\n  • ', v)
                     txt_out += f"{title.upper()}\n{'-'*len(title)}\n{v.strip()}\n\n"
             st.download_button(
-                "📄 Download TXT",
+                "Download TXT",
                 txt_out,
                 file_name=f"{f_name}.txt",
                 mime="text/plain",
